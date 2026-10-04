@@ -556,9 +556,13 @@ namespace ModernBoxM2Rewrite
             }
             if (identity == null || string.IsNullOrEmpty(identity.banner_id)) return;
             BannerAsset banner = AssetManager.kingdom_banners_library.get(identity.banner_id);
-            if (banner == null) return;
-            if (banner.backgrounds == null || banner.backgrounds.Count == 0)
-                return;
+            if (banner == null || banner.backgrounds == null || banner.backgrounds.Count == 0)
+            {
+                // A banner id with no pictures crashes the kingdom nameplate.
+                kingdom.data.original_actor_asset = "human";
+                banner = AssetManager.kingdom_banners_library.get("human");
+                if (banner == null || banner.backgrounds == null || banner.backgrounds.Count == 0) return;
+            }
             if (kingdom.data.banner_background_id < 0 ||
                 kingdom.data.banner_background_id >= banner.backgrounds.Count)
                 kingdom.data.banner_background_id = 0;
