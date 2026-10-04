@@ -1,9 +1,9 @@
 {
-  "name": "ModernBox 2 Port  ",
-  "author": "Tuxxego and ModernBox contributors",
+  "name": "ModernBox 2",
+  "author": "Tuxxego (0.51.2 port by microwave805)",
   "version": "2.2.0.0",
-  "targetGameBuild": 558,
-  "description": "Welcome to the Modern and (not for now) Space Age.",
+  "targetGameBuild": 719,
+  "description": "Welcome to the Modern and Space Age.",
   "iconPath": "icon.jpg",
-  "RepoUrl": "https://gamebanana.com/mods/462076"
+  "RepoUrl": "https://github.com/Tuxxego/ModernBox"
 }

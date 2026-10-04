@@ -1,19 +1,19 @@
-# ModernBox-2
+# ModernBox 2
 
-Welcome to the Modern and (not for now) Space Age.
+Welcome to the Modern and Space Age. Guns, vehicles, drugs, casinos, MIRVs and space travel.
 
-# Required loader
+This is M2 ported to WorldBox 0.51.2 so it runs on the new game. The aim was to keep it as close to the original M2 as possible.
 
-This build is meant to be used with `NeoModLoader.dll` version `1.2.0.1`.
-If someone launches the mod with a different NeoModLoader build, the mod may fail to load or throw startup errors.
+## Required loader
 
-# Install
+Made and tested with `NeoModLoader.dll` version `1.2.0.1` on WorldBox 0.51.2 (build 719). Other versions might work but no promises.
 
-1. Copy `NeoModLoader.dll` version `1.2.0.1` into:
-`WorldBox_Data\StreamingAssets\mods`
-2. Copy the full `modernbox-m2` folder into that same `mods` folder.
-3. Start WorldBox with experimental mode enabled.
-The final layout should look like this:
+## Install
+
+1. Copy `NeoModLoader.dll` into:
+   `WorldBox\worldbox_Data\StreamingAssets\mods`
+2. Copy the `ModernBox-M2` folder into that same `mods` folder.
+3. Start WorldBox. The mod shows up as the M2 tab.
 
 ```text
 WorldBox
@@ -21,46 +21,37 @@ WorldBox
    └─ StreamingAssets
       └─ mods
          ├─ NeoModLoader.dll
-         └─ M2Port
+         └─ ModernBox-M2
 ```
 
+## Tech and eras
 
-## Culture progression
+0.51.2 removed culture tech, so the port brings back M2's own version of it. Every human, orc, elf and dwarf culture researches techs on its own, with the same costs and speed as the old game. Once they research far enough they move into the next era:
 
-The rewrite uses the *Standard** pace: the world starts Medieval and rolls a saved 50-200 world-year interval for each transition. Every supported civilization advances together, and reloading a save does not reroll the world's era dates.
+- Renaissance at culture level 55
+- Industrial at 65
+- Modern at 80
+- Future at 90
 
-| Transition | Standard interval |
-| --- | ---: |
-| Medieval to Renaissance | 50-200 world years |
-| Renaissance to Industrial | 50-200 world years |
-| Industrial to Modern | 50-200 world years |
-| Modern to Future | 50-200 world years |
+Each culture moves at its own pace, so you can have a future empire next to a medieval one. Buildings, guns, armor, ships and barracks units unlock with the same techs as in M2.
 
-This is based only on total world history year, not culture age, or population. Buildings, armies, factories, equipment, and race/era appearances use the current world era.
+Research is slow, like it was in the original. Smart city leaders and lots of cities speed it up. If you don't want to wait there's a research speed button in the Technologies window (1x is the original speed, it goes up to 10x).
 
-Casinos, restaurants, malls, schools, and modern buildings are directly buildable and unlimited after Renaissance. Every individual factory and MissileSilo is limited to one per city. Existing too-advanced buildings in an old save are left intact, but no new early upgrades or construction are allowed.
+The Technologies button is in the M2 tab under the Medieval Units button. It shows a culture's era, what it's researching and which techs it has. Hover over an icon to see what it does.
 
-## Production and resources
+Old saves get their cultures caught up to the era the world was in.
 
-Factory production is free where original M2 declared no unit price. Boat actors retain their declared wood/gold cost. Production runs in bounded five-second city passes and allows up to 40 M2 vehicles per city.
+## Different from the original
 
-Dock progression is upgrade-only: a terminal native dock can become a Renaissance dock in Renaissance, an Industrial dock in Industrial, and a Modern dock in Modern. Each dock upgrade costs one gold. Upgraded docks spend one wood plus one gold for each M2 boat.
+Some things couldn't be done the same way on 0.51.2:
 
-- Commerce buildings produce one gold every 30 seconds, capped at 500 per city.
-- Schools produce one CyberWareParts every 60 seconds, capped at 100.
-- Factories produce one Parts every 30 seconds, capped at 200.
-- Air, Terran, and P9000 factories plus MissileSilo produce one Xenium every 120 seconds, capped at 50.
+- The heroes, trading, storage and smith era techs don't do anything because 0.51.2 has nothing for them to change. They still count towards the culture level.
+- The old vanilla techs only set the research speed. 0.51.2 handles housing, zones and weapons its own way.
+- Human cities upgrade their houses and halls by tech like in M2. 0.51.2 normally also wants a big hall first, which stopped cities from ever reaching the modern houses.
+- Cities keep 10 metal back from crafting so they can still afford buildings. Without this, soldiers spent all of it on guns and cities stopped growing.
+- The eraser drop uses a different sprite. The original one isn't in the files.
+- Some color variants and sounds aren't in yet.
 
-Equipment without a complete original recipe uses era fallbacks: Renaissance `1 wood + 1 common metal + 1 gold`; Industrial `2 common metals + 2 gold`; Modern `2 Parts + 2 common metals + 3 gold`; Future `2 Parts + 1 Xenium + 4 gold`. Cyberware uses `2 CyberWareParts + 1 Parts + 2 gold`; MIRV and MIRVBomb use `3/5 Parts + 2/4 Xenium + 5/10 gold`.
+## Bugs
 
-
-## Included and deferred scope
-
-Included: four-civilization era armies, land vehicles, aircraft, future/Goliath units, naval actors, factories, equipment, traits, five ideologies, names, resources, bosses, bounded invasions, Alien Jungle as a normal-map biome, custom bombs, and missile silos.
-
-Deferred: the star map, generated planets and stars, colony ships, planet transfers, copy/paste-world features, planet-only biome wrappers, and Universal Destruction. No deferred space system initializes or modifies saves in this build.
-
-
-
-
-
+If something breaks, send the `error_*.log` from `AppData\LocalLow\mkarpenko\WorldBox\logs` along with what you were doing.

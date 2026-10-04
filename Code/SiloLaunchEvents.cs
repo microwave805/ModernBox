@@ -1,125 +1,71 @@
 using System.Collections.Generic;
-using System.Linq;
-using UnityEngine;
+using HarmonyLib;
 
 namespace ModernBoxM2Rewrite
 {
+    /// Original M2 MissileSilo: a city tower that fires NUKER every 32 seconds at
+    /// enemies within 150 chunks. Cities only queue it while the nuke toggle is on.
     internal static class SiloLaunchEvents
     {
-        internal const string AssetId = "modernbox_missile_silo_launch";
-        private static readonly Dictionary<int, float> LastLaunch = new Dictionary<int, float>();
+        internal const string SiloId = "MissileSilo";
+        private const int SiloChunkRange = 150;
+        private const int MinimumTargetHealth = 8000;
+        private static readonly Dictionary<CityBuildOrderAsset, BuildOrder> Orders = new Dictionary<CityBuildOrderAsset, BuildOrder>();
+        private static bool? _ordersActive;
         internal static long LaunchCount { get; private set; }
 
-        internal static void Register()
+        internal static void RegisterOrder(string race, CityBuildOrderAsset orders)
         {
-            WorldLogAsset asset = AssetManager.world_log_library.get(AssetId);
-            if (asset == null)
+            if (orders == null) return;
+            string orderId = "order_m2_" + race + "_" + SiloId;
+            BuildOrder order = orders.list.Find(candidate => candidate != null && candidate.id == orderId);
+            if (order == null)
             {
-                asset = new WorldLogAsset
-                {
-                    id = AssetId,
-                    locale_id = AssetId,
-                    group = "wars",
-                    path_icon = "ui/Icons/Nuke",
-                    color = Toolbox.color_log_warning,
-                    text_replacer = FormatText
-                };
-                AssetManager.world_log_library.add(asset);
+                order = orders.addBuilding(orderId, 1, 50, 16, false, false, 0);
+                order.requirements_types = new[] { "type_bonfire" };
             }
-            ModernLocalization.Add(AssetId, "$kingdom$ launched a nuclear missile from $city$ at $target$!");
+            Orders[orders] = order;
+            _ordersActive = null;
+            SyncOrders();
         }
 
-        private static void FormatText(WorldLogMessage message, ref string text)
+        internal static void SyncOrders()
         {
-            AssetManager.world_log_library.updateText(ref text, message, "$kingdom$", 1);
-            AssetManager.world_log_library.updateText(ref text, message, "$city$", 2);
-            AssetManager.world_log_library.updateText(ref text, message, "$target$", 3);
-        }
-
-        internal static void Update()
-        {
-            if (!ModernBoxSettings.Get("NukeOption") || World.world == null || World.world.isPaused()) return;
-            foreach (City city in World.world.cities.list.ToArray())
+            bool active = ModernBoxSettings.Get("NukeOption");
+            if (_ordersActive == active) return;
+            _ordersActive = active;
+            foreach (KeyValuePair<CityBuildOrderAsset, BuildOrder> pair in Orders)
             {
-                if (!ModernProgression.IsSupportedCity(city) || city.kingdom == null || !city.kingdom.hasEnemies()) continue;
-                List<Building> silos = city.getBuildingListOfID("MissileSilo");
-                if (silos == null) continue;
-                foreach (Building silo in silos.ToArray())
-                {
-                    if (silo == null || !silo.isAlive() || !silo.isUsable() || silo.isUnderConstruction()) continue;
-                    int key = silo.GetHashCode();
-                    float last;
-                    if (LastLaunch.TryGetValue(key, out last) && Time.time - last < 32f) continue;
-                    Kingdom attacker = city.kingdom;
-                    City targetCity = FindWarTarget(attacker);
-                    if (targetCity == null) continue;
-                    Kingdom targetKingdom = targetCity.kingdom;
-                    if (targetKingdom == null || targetKingdom == attacker || !attacker.isInWarWith(targetKingdom)) continue;
-                    Building target = targetCity.buildings.FirstOrDefault(building =>
-                        building != null && building.isAlive() && building.kingdom == targetKingdom);
-                    WorldTile targetTile = target == null ? targetCity.getTile(false) : target.current_tile;
-                    if (targetTile == null) continue;
-                    Vector3 targetPosition = target == null ? targetTile.posV3 : target.current_position;
-
-                    // Revalidate immediately before launch. getEnemiesKingdoms can
-                    // contain stale entries while wars/captures are being resolved.
-                    // A null projectile target also freezes the selected hostile
-                    // coordinate instead of following a building whose ownership
-                    // changes while the missile is in flight.
-                    if (city.kingdom != attacker || targetCity.kingdom != targetKingdom ||
-                        targetKingdom == attacker || !attacker.isInWarWith(targetKingdom)) continue;
-                    World.world.projectiles.spawn(silo, null, "NUKER", silo.current_position, targetPosition);
-                    LastLaunch[key] = Time.time;
-                    Notify(silo, targetPosition, targetKingdom.name);
-                    break;
-                }
+                bool present = pair.Key.list.Contains(pair.Value);
+                if (active && !present) pair.Key.list.Add(pair.Value);
+                else if (!active && present) pair.Key.list.Remove(pair.Value);
+                pair.Key.prepareForAssetGeneration();
             }
         }
 
-        private static City FindWarTarget(Kingdom attacker)
+        internal static BaseSimObject FindTarget(Building silo)
         {
-            if (attacker == null) return null;
-            ListPool<Kingdom> enemies = attacker.getEnemiesKingdoms();
-            if (enemies == null || enemies.Count == 0) return null;
-            for (int index = 0; index < enemies.Count; index++)
-            {
-                Kingdom enemy = enemies[index];
-                if (enemy == null || enemy == attacker || enemy.wild || !attacker.isInWarWith(enemy) || enemy.cities.Count == 0) continue;
-                City candidate = enemy.cities[UnityEngine.Random.Range(0, enemy.cities.Count)];
-                if (candidate == null || candidate.kingdom != enemy || candidate.kingdom == attacker) continue;
-                return candidate;
-            }
-            return null;
-        }
-
-        internal static void Notify(Building silo, Vector3 targetPosition)
-        {
-            Notify(silo, targetPosition, "an enemy kingdom");
-        }
-
-        internal static void Notify(Building silo, Vector3 targetPosition, string targetName)
-        {
-            if (silo == null || silo.asset == null || silo.asset.id != "MissileSilo") return;
-            WorldLogAsset asset = AssetManager.world_log_library.get(AssetId);
-            if (asset == null) return;
-            City city = silo.getCity();
-            Kingdom kingdom = silo.kingdom ?? (city == null ? null : city.kingdom);
-            string kingdomName = kingdom == null ? "An unknown nation" : kingdom.name;
-            string cityName = city == null ? "an unknown silo" : city.name;
-            WorldLogMessage message = new WorldLogMessage(asset, kingdomName, cityName, targetName)
-            {
-                location = new Vector2(targetPosition.x, targetPosition.y),
-                kingdom = kingdom
-            };
-            if (kingdom != null && kingdom.getColor() != null)
-            {
-                Color textColor = kingdom.getColor().getColorText();
-                message.color_special1 = textColor;
-                message.color_special2 = textColor;
-            }
-            WorldLogMessageExtensions.add(message);
+            if (silo == null || silo.current_tile == null || silo.kingdom == null) return null;
+            EnemyFinderData data = EnemiesFinder.findEnemiesFrom(silo.current_tile, silo.kingdom, SiloChunkRange);
+            if (data == null || data.isEmpty()) return null;
+            BaseSimObject candidate = silo.checkObjectList(data.list, silo.asset.tower_attack_buildings, Randy.randomChance(0.6f), false);
+            if (candidate == null || candidate.kingdom == silo.kingdom) return null;
+            if (candidate.isActor() && candidate.getHealth() < MinimumTargetHealth) return null;
             LaunchCount++;
-            ModernBoxDiagnostics.Info(kingdomName + " launched a silo nuclear missile from " + cityName + " at " + targetName + ".");
+            return candidate;
+        }
+    }
+
+    [HarmonyPatch(typeof(BuildingTower), "findTarget")]
+    internal static class MissileSiloTargetPatch
+    {
+        [HarmonyPrefix]
+        private static bool Prefix(BuildingTower __instance, ref BaseSimObject __result)
+        {
+            Building building = __instance == null ? null : __instance.building;
+            if (building == null || building.asset == null || building.asset.id != SiloLaunchEvents.SiloId) return true;
+            __result = SiloLaunchEvents.FindTarget(building);
+            return false;
         }
     }
 }

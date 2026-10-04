@@ -1,124 +1,142 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace ModernBoxM2Rewrite
 {
+    /// <summary>
+    /// M2's creature disasters (CyberDisaster, IceWalkerDisaster,
+    /// hashbrowncatdisaster, Vaticandisaster) as native disasters, so the game's
+    /// own disaster roll decides when they happen, exactly like the original.
+    /// </summary>
     internal static class InvasionService
     {
-        private sealed class SpawnBatch
-        {
-            internal string[] ActorIds;
-            internal string FactionId;
-            internal int Remaining;
-            internal int WorldCap;
-            internal WorldTile SpawnTile;
-        }
-
-        private static readonly Queue<SpawnBatch> Batches = new Queue<SpawnBatch>();
-        private static float _checkTimer;
-        private static int _worldKey;
-        private static bool _hashbrownTriggered;
-        private static bool _vaticanTriggered;
+        private const string ZombieTrait = "zombie";
+        private const int VaticanZombieThreshold = 500;
 
         internal static void Update(float elapsed)
         {
-            if (World.world == null || World.world.isPaused()) return;
-            int key = World.world.GetHashCode();
-            if (key != _worldKey)
+        }
+
+        internal static void RegisterDisasters()
+        {
+            RegisterLog("modernbox_disaster_cyber", "worldlog_disaster_alien_invasion", "ui/Icons/SolarPoweredCyberBody");
+            RegisterLog("modernbox_disaster_ice_walker", "worldlog_disaster_ice_ones", "ui/Icons/Walker_TitanIcon");
+            RegisterLog("modernbox_disaster_hashbrown", "worldlog_disaster_alien_invasion", "ui/Icons/iconCat");
+            RegisterLog("modernbox_disaster_vatican", "worldlog_disaster_alien_invasion", "ui/Icons/Vatican");
+
+            // rate 0 keeps these two out of the disaster pool, as in the original.
+            Add("CyberDisaster", 0, 0f, 10000, 100, "modernbox_disaster_cyber", "Assimilatus", 1, 1, 1,
+                SimpleUnitAssetSpawnUsingIslands, "age_hope", "age_sun", "age_wonders");
+            Add("IceWalkerDisaster", 0, 0f, 10000, 100, "modernbox_disaster_ice_walker", "Cocytuswalker", 1, 1, 1,
+                SimpleUnitAssetSpawnUsingIslands, "age_ice", "age_despair");
+            Add("hashbrowncatdisaster", 1, 0.1f, 500, 4, "modernbox_disaster_hashbrown", "hashbrowncat", 5, 5, 1,
+                SimpleUnitAssetSpawnUsingIslands, "age_hope", "age_sun", "age_wonders");
+            Add("Vaticandisaster", 4, 0.5f, 0, 0, "modernbox_disaster_vatican", "basecrusader", 1000, 300, 300,
+                SpawnVaticanDisasterWithTrait, "age_hope", "age_sun", "age_ash", "age_dark", "age_tears", "age_moon",
+                "age_chaos", "age_despair", "age_ice", "age_wonders");
+        }
+
+        private static void RegisterLog(string id, string localeId, string icon)
+        {
+            if (AssetManager.world_log_library.get(id) != null) return;
+            WorldLogAsset log = AssetManager.world_log_library.clone(id, "$basic_disaster$");
+            log.locale_id = localeId;
+            log.path_icon = icon;
+        }
+
+        private static void Add(string id, int rate, float chance, int population, int cities, string log, string unit,
+            int maxExisting, int unitsMin, int unitsMax, DisasterAction action, params string[] ages)
+        {
+            if (AssetManager.disasters.get(id) != null) return;
+            DisasterAsset disaster = new DisasterAsset
             {
-                _worldKey = key;
-                _hashbrownTriggered = false;
-                _vaticanTriggered = false;
-                Batches.Clear();
+                id = id,
+                rate = rate,
+                chance = chance,
+                min_world_population = population,
+                min_world_cities = cities,
+                world_log = log,
+                spawn_asset_unit = unit,
+                max_existing_units = maxExisting,
+                units_min = unitsMin,
+                units_max = unitsMax,
+                type = DisasterType.Other,
+                premium_only = false,
+                action = action
+            };
+            foreach (string age in ages) disaster.ages_allow.Add(age);
+            AssetManager.disasters.add(disaster);
+        }
+
+        private static void SimpleUnitAssetSpawnUsingIslands(DisasterAsset disaster)
+        {
+            if (!CheckUnitSpawnLimits(disaster) || World.world.islands_calculator == null) return;
+            TileIsland island = World.world.islands_calculator.getRandomIslandGround();
+            if (island == null) return;
+            WorldTile tile = island.getRandomTile();
+            if (tile == null) return;
+            SpawnDisasterUnits(disaster, tile);
+            WorldLog.logDisaster(disaster, tile);
+        }
+
+        // The original counted every unit of the spawned unit's race.
+        private static bool CheckUnitSpawnLimits(DisasterAsset disaster)
+        {
+            if (string.IsNullOrEmpty(disaster.spawn_asset_unit) || AssetManager.actor_library.get(disaster.spawn_asset_unit) == null) return false;
+            string[] race;
+            switch (disaster.spawn_asset_unit)
+            {
+                case "Assimilatus":
+                    race = new[] { "assimilator", "assimilarptor", "assimilatrax", "helilator", "assizeppelin", "Assimilatus" };
+                    break;
+                case "Cocytuswalker":
+                    race = new[] { "cold_one", "newwalker", "normalwalker", "icedracoid", "buffrost", "Cocytuswalker" };
+                    break;
+                case "hashbrowncat":
+                    race = new[] { "cat", "hashbrowncat", "peones", "xenodogo" };
+                    break;
+                default:
+                    race = new[] { disaster.spawn_asset_unit };
+                    break;
             }
-            ProcessBatch();
-            if (!ModernBoxSettings.Get("AutomaticInvasionsOption")) return;
-            _checkTimer += elapsed;
-            if (_checkTimer < 30f) return;
-            _checkTimer = 0f;
-            CheckHashbrown();
-            CheckVatican();
-        }
-
-        private static void CheckHashbrown()
-        {
-            if (_hashbrownTriggered || World.world.cities.list.Count < 4 || TotalPopulation() < 500) return;
-            _hashbrownTriggered = true;
-            Batches.Enqueue(new SpawnBatch
+            int count = 0;
+            foreach (string id in race)
             {
-                ActorIds = new[] { "hashbrowncat" },
-                FactionId = "ModernBoxM2Invasion",
-                Remaining = UnityEngine.Random.Range(1, 6),
-                WorldCap = 50
-            });
-            ModernBoxDiagnostics.Info("Queued bounded Hashbrown invasion.");
-        }
-
-        private static void CheckVatican()
-        {
-            if (_vaticanTriggered || CountActors(candidate => candidate.asset != null && candidate.asset.id.IndexOf("zombie", System.StringComparison.OrdinalIgnoreCase) >= 0) < 500) return;
-            _vaticanTriggered = true;
-            Batches.Enqueue(new SpawnBatch
-            {
-                // Include M2's full Vatican force in the initial counter-invasion.
-                // Base crusaders remain weighted three times more heavily and may
-                // still evolve into any of the specialist units after six kills.
-                ActorIds = new[] { "basecrusader", "basecrusader", "basecrusader", "crusaderdreadnaught", "crusaderHeli", "crusadermaus" },
-                FactionId = ActorsAndBuildingsRegistry.CrusaderKingdomId,
-                Remaining = 300,
-                WorldCap = 1000,
-                // Original M2 chose one unrestricted random world tile and
-                // created the entire Vatican force at that location.
-                SpawnTile = RandomSpawnTile()
-            });
-            ModernBoxDiagnostics.Info("Queued a mixed 300-unit Vatican counter-invasion across multiple frames.");
-        }
-
-        private static void ProcessBatch()
-        {
-            if (Batches.Count == 0) return;
-            SpawnBatch batch = Batches.Peek();
-            int current = CountActors(candidate => candidate.kingdom != null && candidate.kingdom.asset != null && candidate.kingdom.asset.id == batch.FactionId);
-            int allowance = Mathf.Min(10, Mathf.Min(batch.Remaining, batch.WorldCap - current));
-            for (int i = 0; i < allowance; i++)
-            {
-                WorldTile tile = batch.SpawnTile ?? RandomSpawnTile();
-                if (tile == null) break;
-                string actorId = batch.ActorIds[UnityEngine.Random.Range(0, batch.ActorIds.Length)];
-                ModernUnitSpec spec = ContentRegistry.Units.Find(candidate => candidate.Id == actorId);
-                Actor actor = World.world.units.spawnNewUnit(actorId, tile, true, true, spec != null && spec.Flying ? 2f : 0f, null, false, true);
-                if (actor != null)
-                {
-                    ActorsAndBuildingsRegistry.MakeInvasionActor(actor, batch.FactionId);
-                    batch.Remaining--;
-                }
+                ActorAsset asset = AssetManager.actor_library.get(id);
+                if (asset != null && asset.units != null) count += asset.units.Count;
             }
-            if (batch.Remaining <= 0 || current >= batch.WorldCap) Batches.Dequeue();
+            return count < disaster.max_existing_units;
         }
 
-        private static int TotalPopulation()
+        private static void SpawnDisasterUnits(DisasterAsset disaster, WorldTile tile)
         {
-            int total = 0;
-            foreach (City city in World.world.cities.list) if (city != null && !city.isRekt()) total += city.getPopulationPeople();
-            return total;
+            EffectsLibrary.spawn("fx_spawn", tile);
+            int amount = Random.Range(disaster.units_min, disaster.units_max);
+            for (int i = 0; i < amount; i++)
+            {
+                Actor actor = World.world.units.createNewUnit(disaster.spawn_asset_unit, tile);
+                if (actor != null) ActorsAndBuildingsRegistry.EnsureUnitRuntimeState(actor);
+            }
         }
 
-        private static int CountActors(System.Predicate<Actor> predicate)
+        private static void SpawnVaticanDisasterWithTrait(DisasterAsset disaster)
+        {
+            if (!HasSufficientTraitCount(ZombieTrait, VaticanZombieThreshold)) return;
+            WorldTile[] tiles = World.world.tiles_list;
+            if (tiles == null || tiles.Length == 0) return;
+            WorldTile tile = tiles[Random.Range(0, tiles.Length)];
+            SpawnDisasterUnits(disaster, tile);
+            WorldLog.logDisaster(disaster, tile);
+        }
+
+        private static bool HasSufficientTraitCount(string traitId, int requiredCount)
         {
             int count = 0;
-            foreach (Actor actor in World.world.units) if (actor != null && actor.isAlive() && predicate(actor)) count++;
-            return count;
-        }
-
-        private static WorldTile RandomSpawnTile()
-        {
-            // Original M2 used World.world.tilesList.GetRandom(), so the Vatican
-            // counter-invasion remains possible even after zombies erase every
-            // civilization and city from the map.
-            WorldTile[] tiles = World.world.tiles_list;
-            return tiles == null || tiles.Length == 0
-                ? null
-                : tiles[UnityEngine.Random.Range(0, tiles.Length)];
+            foreach (Actor actor in World.world.units)
+            {
+                if (actor == null || !actor.isAlive() || !actor.hasTrait(traitId)) continue;
+                if (++count >= requiredCount) return true;
+            }
+            return false;
         }
     }
 }

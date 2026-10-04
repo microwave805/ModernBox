@@ -1,18 +1,16 @@
-﻿using System;
+using System;
 using System.Collections;
-using System.IO;
 using HarmonyLib;
 using NCMS;
 using NeoModLoader.api;
 using UnityEngine;
-using UnityEngine.Networking;
 
 namespace ModernBoxM2Rewrite
 {
     [ModEntry]
     internal sealed class ModernBoxMod : BasicMod<ModernBoxMod>
     {
-        private const string HostName = "ModernBoxM2RewriteRuntime";
+        private const string HostName = "ModernBoxM2Runtime";
         private const string CommunityUrl = "https://gamebanana.com/mods/462076";
         internal static string ModFolder { get; private set; }
 
@@ -23,8 +21,6 @@ namespace ModernBoxM2Rewrite
 
         protected override void OnModLoad()
         {
-            // The override above is required on NML 1.2.0.1 because its manifest
-            // constructor does not copy RepoUrl into the live declaration.
             ModFolder = GetDeclaration().FolderPath;
             ModernBoxSettings.LoadAndMigrate();
             GameObject host = GameObject.Find(HostName);
@@ -36,7 +32,6 @@ namespace ModernBoxM2Rewrite
             ModernBoxRuntime runtime = host.GetComponent<ModernBoxRuntime>();
             if (runtime == null) runtime = host.AddComponent<ModernBoxRuntime>();
             runtime.Begin();
-            LogInfo("Persistent rewrite runtime host created.");
         }
     }
 
@@ -49,10 +44,6 @@ namespace ModernBoxM2Rewrite
         private bool _started;
         private bool _failed;
         private string _failure;
-        private bool _showDiagnostics;
-        private Rect _diagnosticsRect = new Rect(210f, 100f, 640f, 470f);
-        private Vector2 _diagnosticsScroll;
-        private AudioSource _audioSource;
 
         internal void Begin()
         {
@@ -64,9 +55,7 @@ namespace ModernBoxM2Rewrite
 
         private IEnumerator InitializeWhenReady()
         {
-            // ResourceLibrary loads its ground sprites after its assets are created.
-            // Registering custom resources before that second phase leaves the
-            // vanilla sprite template empty and aborts the entire mod startup.
+            // Resource sprites load a bit after the assets, wait for them.
             while (AssetManager.actor_library == null || AssetManager.buildings == null || AssetManager.powers == null ||
                    AssetManager.biome_library == null || AssetManager.top_tiles == null ||
                    AssetManager.resources == null || AssetManager.dynamic_sprites_library == null ||
@@ -79,18 +68,21 @@ namespace ModernBoxM2Rewrite
                 if (!string.IsNullOrEmpty(conflict)) throw new InvalidOperationException(conflict);
                 ContentRegistry.RegisterAll();
                 _harmony = new Harmony(ModernBoxCatalog.HarmonyId);
-                _harmony.PatchAll(typeof(ModernBoxMod).Assembly);
+                foreach (Type type in AccessTools.GetTypesFromAssembly(typeof(ModernBoxMod).Assembly))
+                {
+                    if (!type.IsDefined(typeof(HarmonyPatch), true)) continue;
+                    try { _harmony.CreateClassProcessor(type).Patch(); }
+                    catch (Exception e) { ModernBoxDiagnostics.Error("Patch " + type.Name + " failed: " + e); }
+                }
                 ModernBoxUi.BeginCreate(this);
                 Ready = true;
-                ModernBoxDiagnostics.Info("M2 core rewrite initialized for WorldBox 0.51.2 build 558.");
-                Debug.Log("[ModernBox Rewrite] Initialization complete: " + ContentRegistry.Summary);
-                if (ModernBoxSettings.Get("StartupAudio")) StartCoroutine(PlayStartupAudio());
+                Debug.Log("[ModernBox] loaded (" + ContentRegistry.Summary + ")");
             }
             catch (Exception exception)
             {
                 _failed = true;
-                _failure = exception.ToString();
-                ModernBoxDiagnostics.Error("Initialization failed: " + exception);
+                _failure = exception.Message;
+                ModernBoxDiagnostics.Error("Failed to load: " + exception);
             }
         }
 
@@ -100,54 +92,17 @@ namespace ModernBoxM2Rewrite
             return template != null && template.gameplay_sprites != null && template.gameplay_sprites.Length > 0 && template.gameplay_sprites[0] != null;
         }
 
-        private IEnumerator PlayStartupAudio()
-        {
-            string path = Path.Combine(ModernBoxMod.ModFolder, "file.mp3");
-            if (!File.Exists(path)) yield break;
-            using (UnityWebRequest request = UnityWebRequestMultimedia.GetAudioClip(new Uri(path).AbsoluteUri, AudioType.MPEG))
-            {
-                yield return request.SendWebRequest();
-                if (request.result != UnityWebRequest.Result.Success)
-                {
-                    ModernBoxDiagnostics.Warn("Startup audio could not be loaded: " + request.error);
-                    yield break;
-                }
-                if (_audioSource == null) _audioSource = gameObject.AddComponent<AudioSource>();
-                _audioSource.clip = DownloadHandlerAudioClip.GetContent(request);
-                _audioSource.volume = 0.35f;
-                _audioSource.Play();
-            }
-        }
-
         private void Update()
         {
             if (!Ready || World.world == null) return;
             ProductionService.Update(Time.deltaTime);
-            M2LegacyBehaviorService.Update(Time.deltaTime);
             InvasionService.Update(Time.deltaTime);
             BombService.Update();
         }
 
-        internal void OpenDiagnostics() { _showDiagnostics = true; }
-
         private void OnGUI()
         {
-            if (_failed) GUI.Box(new Rect(10f, 10f, 620f, 70f), "ModernBox M2 Rewrite failed to initialize\n" + _failure);
-            if (_showDiagnostics) _diagnosticsRect = GUI.Window(51023, _diagnosticsRect, DrawDiagnosticsWindow, "ModernBox Diagnostics");
-        }
-
-        private void DrawDiagnosticsWindow(int id)
-        {
-            GUILayout.Label("Registered content: " + ContentRegistry.Summary);
-            GUILayout.Label("Bomb processing: exact-radius multi-frame jobs (pending: " + BombService.PendingJobs + ")");
-            GUILayout.Label("Factory cycles: " + ProductionService.CompletedCycles);
-            GUILayout.Label("Missile-silo launches: " + SiloLaunchEvents.LaunchCount);
-            _diagnosticsScroll = GUILayout.BeginScrollView(_diagnosticsScroll);
-            foreach (string line in ModernBoxDiagnostics.Lines) GUILayout.Label(line);
-            GUILayout.EndScrollView();
-            if (GUILayout.Button("Run asset validation")) ModernBoxDiagnostics.ValidateAssets();
-            if (GUILayout.Button("Close")) _showDiagnostics = false;
-            GUI.DragWindow();
+            if (_failed) GUI.Box(new Rect(10f, 10f, 620f, 70f), "ModernBox failed to load\n" + _failure);
         }
 
         private void OnDestroy()
@@ -158,4 +113,3 @@ namespace ModernBoxM2Rewrite
         }
     }
 }
-

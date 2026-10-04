@@ -73,7 +73,9 @@ namespace ModernBoxM2Rewrite
             { "thunderartillery", "thunderplasma" },
             { "hyperartillery", "hyperkame" },
             { "rockthrow", "Stone" },
-            { "snowballindaface", "yugesnowball" }
+            { "snowballindaface", "yugesnowball" },
+            { "MIRV", "MIRVartillery" },
+            { "MIRVBomb", "bigbomb" }
         };
 
         internal static readonly string[] CustomProjectileIds =
@@ -148,6 +150,9 @@ namespace ModernBoxM2Rewrite
             RegisterTerraform("nonannoyingbomb", true, false, 2, false, true);
             RegisterTerraform("nonannoyingbullet", true, false, 0, false, false);
             RegisterTerraform("antiairbomb", true, false, 2, true, false);
+            RegisterTerraform("deathexplosion", true, true, 1, false, false);
+            TerraformOptions grenade = AssetManager.terraform.get("grenade");
+            if (grenade != null) AssetManager.terraform.get("deathexplosion").remove_ruins = grenade.remove_ruins;
 
             RegisterEffect("groundshake", "effects/groundshake", string.Empty, 2f, 5f, 100);
             RegisterEffect("Shermanboom", "effects/Shermanboom", string.Empty, 1f, 0f, 80);
@@ -227,6 +232,8 @@ namespace ModernBoxM2Rewrite
             RegisterAttack("thunderartillery", Stats("projectiles", 1f, "attack_speed", 90f, "range", 0f, "targets", 10f, "damage", 6f, "damage_range", 0.7f));
             RegisterAttack("hyperartillery", Stats("projectiles", 1f, "attack_speed", -20000f, "range", 0f, "targets", 20f, "damage", 6f, "damage_range", 0.7f));
             RegisterAttack("rockthrow", Stats("targets", 1f, "range", 16f, "projectiles", 1f));
+            RegisterAttack("MIRV", Stats("range", 0f, "accuracy", 0f, "attack_speed", 1f, "damage", 0f));
+            RegisterAttack("MIRVBomb", Stats("range", 0f, "accuracy", 0f, "attack_speed", 1f, "damage", 0f));
             RegisterAttack("snowballindaface", Stats("targets", 10f, "range", 16f, "projectiles", 1f, "critical_chance", 0.3f, "critical_damage_multiplier", 0.8f));
         }
 

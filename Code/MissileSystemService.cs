@@ -1,15 +1,11 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace ModernBoxM2Rewrite
 {
-    /// <summary>
-    /// Build-719 equivalent of the strategic MissileSystem controller used by
-    /// modern ModernBox. The actor's displayed M2 range remains 150, while this
-    /// decision deliberately selects a city belonging to a kingdom that is
-    /// actually at war with the launcher. A dedicated decision is required here:
-    /// ordinary attacker AI only searches its local range and allows additive
-    /// attack-speed stats to turn M2's 0.1 rate into rapid fire.
-    /// </summary>
+    /// MissileSystem launcher. Original M2 used the ordinary attacker job with a
+    /// 150-tile range; 0.51.2 clamps attack speed to at least 0.5/s, so a decision
+    /// with a 10 s cooldown fires instead, still only at enemy cities in range.
     internal static class MissileSystemService
     {
         internal const string DecisionId = "modernbox_m2_missile_system_launch";
@@ -53,7 +49,7 @@ namespace ModernBoxM2Rewrite
                 !caster.kingdom.hasEnemies() || World.world == null || World.world.projectiles == null)
                 return false;
 
-            City targetCity = FindHostileCity(caster.kingdom);
+            City targetCity = FindHostileCity(caster.kingdom, caster.current_tile);
             if (targetCity == null) return false;
             Kingdom targetKingdom = targetCity.kingdom;
             if (targetKingdom == null || targetKingdom == caster.kingdom ||
@@ -80,23 +76,27 @@ namespace ModernBoxM2Rewrite
             return true;
         }
 
-        private static City FindHostileCity(Kingdom attacker)
+        private const int OriginalRange = 150;
+
+        private static City FindHostileCity(Kingdom attacker, WorldTile from)
         {
+            if (from == null) return null;
+            List<City> inRange = new List<City>();
             using (ListPool<Kingdom> enemies = attacker.getEnemiesKingdoms())
             {
                 if (enemies == null || enemies.Count == 0) return null;
-                int start = UnityEngine.Random.Range(0, enemies.Count);
-                for (int offset = 0; offset < enemies.Count; offset++)
+                foreach (Kingdom enemy in enemies)
                 {
-                    Kingdom enemy = enemies[(start + offset) % enemies.Count];
                     if (enemy == null || enemy == attacker || enemy.wild ||
-                        !attacker.isInWarWith(enemy) || enemy.cities == null || enemy.cities.Count == 0)
-                        continue;
-                    City city = enemy.cities[UnityEngine.Random.Range(0, enemy.cities.Count)];
-                    if (city != null && city.kingdom == enemy) return city;
+                        !attacker.isInWarWith(enemy) || enemy.cities == null) continue;
+                    foreach (City city in enemy.cities)
+                    {
+                        WorldTile tile = city == null || city.kingdom != enemy ? null : city.getTile(false);
+                        if (tile != null && Toolbox.SquaredDistTile(from, tile) <= OriginalRange * OriginalRange) inRange.Add(city);
+                    }
                 }
             }
-            return null;
+            return inRange.Count == 0 ? null : inRange[UnityEngine.Random.Range(0, inRange.Count)];
         }
 
         private static Vector2? PickTarget(City city, Kingdom expectedKingdom)

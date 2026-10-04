@@ -22,7 +22,7 @@ namespace ModernBoxM2Rewrite
                     (AssetManager.buildings != null && AssetManager.buildings.has(id)) ||
                     (AssetManager.powers != null && AssetManager.powers.has(id)) ||
                     (AssetManager.resources != null && AssetManager.resources.has(id)))
-                    return "Another ModernBox edition already registered asset '" + id + "'. Disable it before loading ModernBox 2 Rewrite.";
+                    return "Another ModernBox is already loaded (found '" + id + "'). Turn it off and restart.";
             }
             return null;
         }
@@ -33,13 +33,13 @@ namespace ModernBoxM2Rewrite
 
         private static void Add(string level, string message, bool once)
         {
-            string line = "[ModernBox M2 Rewrite][" + level + "] " + message;
+            string line = "[ModernBox] " + (level == "INFO" ? string.Empty : level + ": ") + message;
             if (once && !Once.Add(line)) return;
             Entries.Add(DateTime.Now.ToString("HH:mm:ss") + " " + line);
             if (Entries.Count > MaxLines) Entries.RemoveAt(0);
             if (level == "ERROR") Debug.LogError(line);
             else if (level == "WARN") Debug.LogWarning(line);
-            else if (ModernBoxSettings.Get("DeveloperDiagnostics")) Debug.Log(line);
+            else if (ModernBoxSettings.Get("Developer_Mode")) Debug.Log(line);
         }
 
         internal static void ValidateAssets()
@@ -60,7 +60,7 @@ namespace ModernBoxM2Rewrite
                     Sprite[] sprites = string.IsNullOrEmpty(path) ? null : SpriteTextureLoader.getSpriteList(path, false);
                     if (string.IsNullOrEmpty(path) || walk == null || walk.Length == 0 || sprites == null || sprites.Length == 0)
                     {
-                        Warn("Missing inherited current walker art for " + spec.Id + ".");
+                        Warn("Missing walker art for " + spec.Id + ".");
                         missing++;
                     }
                     continue;
@@ -81,11 +81,7 @@ namespace ModernBoxM2Rewrite
                     missing++;
                 }
             }
-            foreach (string deferred in new[] { "Space", "Galaxy", "Planets", "StarMap" })
-            {
-                if (Directory.Exists(Path.Combine(root, deferred))) { Error("Deferred space asset folder was bundled: " + deferred); missing++; }
-            }
-            Info("Static asset validation completed with " + missing + " problem(s).");
+            Info("Asset check done, " + missing + " problem(s).");
         }
 
         internal static void ValidateRegisteredContent()
@@ -117,7 +113,8 @@ namespace ModernBoxM2Rewrite
                 if (!spec.Humanoid && spec.Role != M2UnitRole.Creature && actor.decision_ids != null &&
                     actor.decision_ids.Any(id => !string.IsNullOrEmpty(id) && id.IndexOf("sleep", StringComparison.OrdinalIgnoreCase) >= 0))
                     errors.Add("actor-sleep-decision:" + spec.Id);
-                if (spec.Role != M2UnitRole.Creature && actor.kingdom_id_wild != "ModernKingdom") errors.Add("actor-fallback:" + spec.Id);
+                if (spec.Role != M2UnitRole.Creature && actor.kingdom_id_wild != ActorsAndBuildingsRegistry.ModernKingdomId &&
+                    actor.kingdom_id_wild != ActorsAndBuildingsRegistry.MissileLauncherKingdomId) errors.Add("actor-fallback:" + spec.Id);
                 if (actor.texture_asset == null || string.IsNullOrEmpty(actor.texture_asset.texture_path_main))
                 {
                     errors.Add("actor-texture:" + spec.Id);
@@ -194,7 +191,7 @@ namespace ModernBoxM2Rewrite
                 if (power == null) errors.Add("bomb-power:" + spec.Id);
                 if (drop == null) errors.Add("bomb-drop:" + spec.Id);
                 if (power != null && power.cached_drop_asset != drop) errors.Add("bomb-cache:" + spec.Id);
-                if (power != null && (!power.hold_action || power.click_power_brush_action != null)) errors.Add("bomb-input:" + spec.Id);
+                if (power != null && (!power.hold_action || !power.show_tool_sizes || power.click_power_brush_action == null)) errors.Add("bomb-input:" + spec.Id);
                 if (drop != null && (Math.Abs(drop.falling_speed - 3.2f) > 0.001f || drop.falling_height.x < 60f || drop.falling_height.y > 70f))
                     errors.Add("bomb-fall:" + spec.Id);
             }
@@ -228,9 +225,8 @@ namespace ModernBoxM2Rewrite
                 missileDecision == null || missileDecision.cooldown != MissileSystemService.LaunchCooldownSeconds)
                 errors.Add("missile-system-mirv");
             BuildingAsset silo = AssetManager.buildings.get("MissileSilo");
-            if (silo == null || silo.tower || silo.tower_projectile != "NUKER" || Math.Abs(silo.tower_projectile_reload - 32f) > 0.001f)
+            if (silo == null || !silo.tower || silo.tower_projectile != "NUKER" || Math.Abs(silo.tower_projectile_reload - 32f) > 0.001f)
                 errors.Add("missile-silo");
-            if (AssetManager.world_log_library.get(SiloLaunchEvents.AssetId) == null) errors.Add("silo-world-log");
             if (AssetManager.biome_library.get(AlienJungleRegistry.BiomeId) == null ||
                 AssetManager.top_tiles.get(AlienJungleRegistry.LowTileId) == null ||
                 AssetManager.top_tiles.get(AlienJungleRegistry.HighTileId) == null ||
@@ -238,8 +234,8 @@ namespace ModernBoxM2Rewrite
                 AssetManager.buildings.get(AlienJungleRegistry.PlantId) == null)
                 errors.Add("alien-jungle");
 
-            if (errors.Count > 0) throw new InvalidOperationException("Registered content validation failed: " + string.Join(", ", errors.ToArray()));
-            Debug.Log("[ModernBox M2 Rewrite] Registered-content validation passed.");
+            if (errors.Count > 0) throw new InvalidOperationException("Content check failed: " + string.Join(", ", errors.ToArray()));
+            Info("Content check passed.");
         }
 
         private static void DuplicateErrors(List<string> errors, IEnumerable<string> ids, string kind)

@@ -85,6 +85,9 @@ namespace ModernBoxM2Rewrite
         internal string UpgradeFrom;
         internal string UpgradeTo;
         internal string Type;
+        internal float Health = 3000f;
+        // Registered for save compatibility only; never built by cities.
+        internal bool Legacy;
     }
 
     internal sealed class BuildingUpgradeSpec
@@ -215,60 +218,25 @@ namespace ModernBoxM2Rewrite
 
     internal static class ModernProgression
     {
-        internal const int StandardMinimumEraYears = 50;
-        internal const int StandardMaximumEraYears = 200;
-        private const int StandardScheduleVersion = 1;
-        private const string ScheduleVersionKey = ModernBoxCatalog.Guid + ".standard_world_era_schedule_version";
-        private const string UnlockYearKeyPrefix = ModernBoxCatalog.Guid + ".standard_world_era_unlock_year.";
+        // Set by the old world-timer eras; only read now to migrate those saves.
         private const string HighestEraKey = ModernBoxCatalog.Guid + ".highest_world_era";
         private static readonly string[] LegacyCultureEraTraits =
         {
             "m2_era_renaissance", "m2_era_industrial", "m2_era_modern", "m2_era_future"
         };
-        private static M2Era? _lastWorldEra;
 
         internal static void UpdateCultures()
         {
-            if (World.world == null || World.world.map_stats == null) return;
-            EnsureStandardSchedule();
-            M2Era currentEra = GetWorldEra();
-            if (World.world.cultures == null) return;
+            if (World.world == null || World.world.cultures == null) return;
             foreach (Culture culture in World.world.cultures)
             {
-                if (culture == null || culture.data == null) continue;
-                if (culture.data.saved_traits != null)
-                {
-                    foreach (string obsoleteTrait in LegacyCultureEraTraits)
-                        while (culture.data.saved_traits.Remove(obsoleteTrait)) { }
-                }
-                if (_lastWorldEra != currentEra && ModernBoxCatalog.IsSupportedRace(culture.species_id))
-                    M2LegacyBehaviorService.RefreshCultureSprites(culture);
+                if (culture == null || culture.data == null || culture.data.saved_traits == null) continue;
+                foreach (string obsoleteTrait in LegacyCultureEraTraits)
+                    while (culture.data.saved_traits.Remove(obsoleteTrait)) { }
             }
-            if (_lastWorldEra == currentEra) return;
-            _lastWorldEra = currentEra;
-            ModernBoxDiagnostics.Info("World entered the M2 " + EraName(currentEra) + " era at world year " + GetWorldYear() + ".");
         }
 
-        private static void EnsureStandardSchedule()
-        {
-            SaveCustomData data = GetScheduleData();
-            if (data == null) return;
-            int version;
-            data.get(ScheduleVersionKey, out version, 0);
-            if (version == StandardScheduleVersion) return;
-
-            int cumulativeYear = 0;
-            long seed = World.world.map_stats.life_dna;
-            if (seed == 0) seed = MapBox.current_world_seed_id;
-            foreach (EraSpec spec in ModernBoxCatalog.Eras)
-            {
-                cumulativeYear += StandardInterval(seed, spec.Era);
-                data.set(UnlockYearKey(spec.Era), cumulativeYear);
-            }
-            data.set(ScheduleVersionKey, StandardScheduleVersion);
-        }
-
-        private static SaveCustomData GetScheduleData()
+        internal static SaveCustomData WorldData()
         {
             if (World.world == null || World.world.map_stats == null) return null;
             if (World.world.map_stats.custom_data == null)
@@ -276,34 +244,14 @@ namespace ModernBoxM2Rewrite
             return World.world.map_stats.custom_data;
         }
 
-        private static int GetUnlockYear(M2Era era)
+        internal static M2Era LegacyWorldEra()
         {
-            EnsureStandardSchedule();
-            SaveCustomData data = GetScheduleData();
-            if (data == null) return int.MaxValue;
-            int year;
-            data.get(UnlockYearKey(era), out year, int.MaxValue);
-            return year;
-        }
-
-        private static string UnlockYearKey(M2Era era)
-        {
-            return UnlockYearKeyPrefix + era.ToString().ToLowerInvariant();
-        }
-
-        private static int StandardInterval(long worldSeed, M2Era era)
-        {
-            // The four world-era years are saved with the world. The seed only
-            // supplies their first rolls, so reloading never changes the timeline.
-            unchecked
-            {
-                ulong value = (ulong)worldSeed + 0x9E3779B97F4A7C15UL * (ulong)((int)era + 1);
-                value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9UL;
-                value = (value ^ (value >> 27)) * 0x94D049BB133111EBUL;
-                value ^= value >> 31;
-                return StandardMinimumEraYears + (int)(value %
-                    (ulong)(StandardMaximumEraYears - StandardMinimumEraYears + 1));
-            }
+            SaveCustomData data = WorldData();
+            if (data == null) return M2Era.Medieval;
+            int value;
+            data.get(HighestEraKey, out value, -1);
+            if (value < (int)M2Era.Medieval) return M2Era.Medieval;
+            return (M2Era)Math.Min(value, (int)M2Era.Future);
         }
 
         internal static M2Era GetEra(City city)
@@ -317,61 +265,10 @@ namespace ModernBoxM2Rewrite
             return (ProgressionTier)(int)GetEra(city);
         }
 
+        // Each culture's era comes from its researched techs, like the original.
         internal static M2Era GetEra(Culture culture)
         {
-            if (culture == null || !ModernBoxCatalog.IsSupportedRace(culture.species_id)) return M2Era.Medieval;
-            return GetWorldEra();
-        }
-
-        internal static M2Era GetWorldEra()
-        {
-            EnsureStandardSchedule();
-            SaveCustomData data = GetScheduleData();
-            if (data == null) return M2Era.Medieval;
-
-            int savedEraValue;
-            data.get(HighestEraKey, out savedEraValue, -1);
-            M2Era savedEra = savedEraValue < (int)M2Era.Medieval
-                ? M2Era.Medieval
-                : (M2Era)Math.Min(savedEraValue, (int)M2Era.Future);
-            M2Era scheduledEra = GetScheduledWorldEra(GetWorldYear());
-
-            // Existing saves from rewrite versions before this monotonic marker
-            // are initialized from their present world year. This also makes a
-            // newly installed year-500 world enter its proper current era at once.
-            if (savedEraValue < 0)
-            {
-                savedEra = scheduledEra;
-                data.set(HighestEraKey, (int)savedEra);
-            }
-
-            // Turning progression off pauses the world at its highest attained
-            // era. It must never demote an established world back to Medieval.
-            if (!ModernBoxSettings.Get("ProgressionOption"))
-                return savedEra;
-
-            if (scheduledEra > savedEra)
-            {
-                savedEra = scheduledEra;
-                data.set(HighestEraKey, (int)savedEra);
-            }
-            else if (savedEraValue > (int)M2Era.Future)
-            {
-                data.set(HighestEraKey, (int)savedEra);
-            }
-            return savedEra;
-        }
-
-        private static M2Era GetScheduledWorldEra(int year)
-        {
-            for (int i = ModernBoxCatalog.Eras.Length - 1; i >= 0; i--)
-                if (year >= GetUnlockYear(ModernBoxCatalog.Eras[i].Era)) return ModernBoxCatalog.Eras[i].Era;
-            return M2Era.Medieval;
-        }
-
-        private static int GetWorldYear()
-        {
-            return World.world == null || World.world.map_stats == null ? 0 : Math.Max(0, World.world.map_stats.history_current_year);
+            return M2Tech.Era(culture);
         }
 
         internal static bool HasEra(City city, M2Era era)
@@ -397,21 +294,6 @@ namespace ModernBoxM2Rewrite
             return asset == null ? string.Empty : asset.id;
         }
 
-        internal static void GetRequirements(M2Era era, out int year, out int population, out int buildings)
-        {
-            // Standard progression is world-year based. Build orders must not
-            // impose the obsolete world-year/population/building thresholds too.
-            year = 0;
-            population = 0;
-            buildings = 0;
-        }
-
-        internal static void GetRequirements(ProgressionTier tier, out int population, out int buildings)
-        {
-            int year;
-            GetRequirements((M2Era)Math.Min((int)tier, (int)M2Era.Future), out year, out population, out buildings);
-        }
-
         internal static string EraName(M2Era era)
         {
             return era == M2Era.Medieval ? "Medieval" : era.ToString();
@@ -421,53 +303,71 @@ namespace ModernBoxM2Rewrite
     internal static class ModernBoxSettings
     {
         private const string Prefix = ModernBoxCatalog.Guid + ".";
-        private const string MigrationKey = Prefix + "migration_2_2";
+        private const string VersionKey = Prefix + "SettingVersion";
+        internal const string SettingsVersion = "2.2.0.0";
         private static readonly Dictionary<string, bool> Values = new Dictionary<string, bool>(StringComparer.Ordinal);
 
-        internal static readonly string[] FactoryKeys =
+        internal static bool IsNewVersion { get; private set; }
+
+        // Saved settings, these have buttons on the tab.
+        private static readonly Dictionary<string, bool> SavedDefaults = new Dictionary<string, bool>(StringComparer.Ordinal)
         {
-            "SoldierOption", "HumveeOption", "TankOption", "AirshipOption", "HeliOption", "DronesOption",
-            "RailgunOption", "FighterJetOption", "GunshipOption", "BoiOption", "MIRVBomberOption",
-            "TerranOption", "P9000Option"
+            { "namesOption", true },
+            { "othernamesOption", true },
+            { "NukeOption", false },
+            { "Developer_Mode", false }
         };
 
-        internal static readonly string[] FeatureKeys =
+        // No button for these in M2, so they always act like the original did.
+        private static readonly Dictionary<string, bool> FixedDefaults = new Dictionary<string, bool>(StringComparer.Ordinal)
         {
-            "ProgressionOption", "ConstructionOption", "FactoriesOption", "EquipmentOption", "GunOption",
-            "PipeGunOption", "CyberwareOption", "DrugsOption", "IdeologiesOption", "namesOption",
-            "othernamesOption", "NukeOption", "MIRVOption", "AutomaticInvasionsOption", "ShakeOption",
-            "StartupAudio", "DeveloperDiagnostics"
+            { "SoldierOption", true },
+            { "HumveeOption", true },
+            { "TankOption", true },
+            { "AirshipOption", true },
+            { "HeliOption", true },
+            { "DronesOption", true },
+            { "RailgunOption", true },
+            { "FighterJetOption", true },
+            { "GunshipOption", true },
+            { "BoiOption", true },
+            { "MIRVBomberOption", true },
+            { "TerranOption", true },
+            { "P9000Option", false },
+            { "FactoriesOption", true },
+            { "ProgressionOption", true },
+            { "ConstructionOption", true },
+            { "EquipmentOption", true },
+            { "GunOption", true },
+            { "PipeGunOption", true },
+            { "CyberwareOption", true },
+            { "DrugsOption", true },
+            { "MIRVOption", false },
+            { "IdeologiesOption", true },
+            { "AutomaticInvasionsOption", true }
         };
 
         internal static void LoadAndMigrate()
         {
-            foreach (string key in FactoryKeys) Values[key] = Read(key, true);
-            foreach (string key in FeatureKeys) Values[key] = Read(key, DefaultFor(key));
-            if (PlayerPrefs.GetInt(MigrationKey, 0) != 0) return;
-            foreach (string key in FactoryKeys) MigrateLegacy(key, key);
-            foreach (string key in FeatureKeys) MigrateLegacy(key, key);
-            MigrateLegacy("FactoriesOption", "FactoriesOption");
-            MigrateLegacy("AutomaticInvasionsOption", "InvasionsOption");
-            PlayerPrefs.SetInt(MigrationKey, 1);
+            foreach (KeyValuePair<string, bool> pair in FixedDefaults) Values[pair.Key] = pair.Value;
+            foreach (KeyValuePair<string, bool> pair in SavedDefaults) Values[pair.Key] = pair.Value;
+
+            // Like the original, a new version resets your settings.
+            IsNewVersion = PlayerPrefs.GetString(VersionKey, string.Empty) != SettingsVersion;
+            if (IsNewVersion)
+            {
+                Save();
+                return;
+            }
+            foreach (KeyValuePair<string, bool> pair in SavedDefaults)
+                Values[pair.Key] = PlayerPrefs.GetInt(Prefix + pair.Key, pair.Value ? 1 : 0) == 1;
+        }
+
+        private static void Save()
+        {
+            foreach (string key in SavedDefaults.Keys) PlayerPrefs.SetInt(Prefix + key, Values[key] ? 1 : 0);
+            PlayerPrefs.SetString(VersionKey, SettingsVersion);
             PlayerPrefs.Save();
-        }
-
-        private static bool DefaultFor(string key)
-        {
-            return key != "NukeOption" && key != "MIRVOption" && key != "AutomaticInvasionsOption" && key != "DeveloperDiagnostics";
-        }
-
-        private static bool Read(string key, bool defaultValue)
-        {
-            return PlayerPrefs.GetInt(Prefix + key, defaultValue ? 1 : 0) == 1;
-        }
-
-        private static void MigrateLegacy(string newKey, string oldKey)
-        {
-            if (PlayerPrefs.HasKey(Prefix + newKey) || !PlayerPrefs.HasKey(oldKey)) return;
-            bool value = PlayerPrefs.GetInt(oldKey, 0) == 1;
-            Values[newKey] = value;
-            PlayerPrefs.SetInt(Prefix + newKey, value ? 1 : 0);
         }
 
         internal static bool Get(string key)
@@ -479,16 +379,15 @@ namespace ModernBoxM2Rewrite
         internal static void Set(string key, bool value)
         {
             Values[key] = value;
-            PlayerPrefs.SetInt(Prefix + key, value ? 1 : 0);
-            PlayerPrefs.Save();
+            if (SavedDefaults.ContainsKey(key)) Save();
             ProductionService.ApplyDynamicSettings();
             ModernBoxUi.SyncNativeToggle(key, value);
         }
 
         internal static void Reset()
         {
-            foreach (string key in FactoryKeys) Set(key, true);
-            foreach (string key in FeatureKeys) Set(key, DefaultFor(key));
+            foreach (KeyValuePair<string, bool> pair in FixedDefaults) Values[pair.Key] = pair.Value;
+            foreach (KeyValuePair<string, bool> pair in SavedDefaults) Set(pair.Key, pair.Value);
         }
     }
 }

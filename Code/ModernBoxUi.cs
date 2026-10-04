@@ -1,24 +1,23 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using DG.Tweening;
 using NeoModLoader.General;
 using NeoModLoader.General.UI.Tab;
 using UnityEngine;
+using UnityEngine.Events;
+using UnityEngine.UI;
 
 namespace ModernBoxM2Rewrite
 {
+    // The M2 tab. Same buttons and spots as the original Buttonz.cs.
     internal static class ModernBoxUi
     {
-        private const string TabId = "modernbox_rewrite_tab";
-        private static readonly Dictionary<string, List<GameObject>> Pages = new Dictionary<string, List<GameObject>>(StringComparer.Ordinal);
-        private static readonly List<GameObject> HubControls = new List<GameObject>();
+        private const string TabId = "Tab_ModernBox";
         private static readonly Dictionary<string, string> ToggleSettings = new Dictionary<string, string>(StringComparer.Ordinal);
         private static readonly Dictionary<string, string> SettingOptions = new Dictionary<string, string>(StringComparer.Ordinal);
         private static PowersTab _tab;
-        private static GameObject _backButton;
-        private static string _activePage;
-        private static bool _showingHub;
+        private static Transform _tabTextLeft;
+        private static Transform _tabTextRight;
 
         internal static void BeginCreate(MonoBehaviour host)
         {
@@ -27,174 +26,205 @@ namespace ModernBoxM2Rewrite
 
         private static IEnumerator CreateWhenReady()
         {
-            while (PowerButtonSelector.instance == null) yield return null;
-            _tab = TabManager.CreateTab(TabId, "modernbox_tab", "modernbox_tab_description", Resources.Load<Sprite>("ui/Icons/tabIconModernWarfare"), null);
+            while (PowerButtonSelector.instance == null || CanvasMain.instance == null) yield return null;
+            ModernLocalization.Add("modernbox_tab", "M2");
+            ModernLocalization.Add("modernbox_tab_description", "Guns, Vehicles, Drugs, Casinos, MIRVs, and SPACE. Welcome to the Modern Age.");
+            ModernLocalization.Add("Tuxxego_mod_creator", "Made By Tuxxego");
+            _tab = TabManager.CreateTab(TabId, "modernbox_tab", "modernbox_tab_description", Resources.Load<Sprite>("ui/Icons/tabIconModernWarfare"), "Tuxxego_mod_creator");
             if (_tab == null)
             {
-                ModernBoxDiagnostics.Error("NML TabManager could not create the ModernBox tab.");
+                ModernBoxDiagnostics.Error("Could not make the M2 tab.");
                 yield break;
             }
-            CreatePages();
-            // TabManager assigns parentObj during the tab's first Unity frame.
-            // Recalculate while every page is still active so the scroll area is
-            // wide enough for the largest page, then hide the inactive pages.
+            M2Windows.CreateAll();
+            CreateButtons();
+            ModernLocalization.Apply();
             while (_tab.parentObj == null) yield return null;
             _tab.recalc();
-            ShowHub(false);
-            ModernLocalization.Apply();
-            ModernBoxDiagnostics.Info("ModernBox animated subtab power tab created through NML TabManager.");
-            Debug.Log("[ModernBox Rewrite] Animated subtab power tab created.");
-        }
+            Debug.Log("[ModernBox] tab ready");
 
-        private static void CreatePages()
-        {
-            string[] pageNames = { "Progression", "Armies", "Units", "Equipment", "Bombs", "Invasions", "Settings" };
-            for (int i = 0; i < pageNames.Length; i++)
+            if (ModernBoxSettings.IsNewVersion)
             {
-                string page = pageNames[i];
-                Pages[page] = new List<GameObject>();
-                ModernLocalization.Add("modernbox_page_" + page, page);
-                ModernLocalization.Add("modernbox_page_" + page + "_description", "Opens the " + page + " tab.");
-                PowerButton pageButton = PowerButtonCreator.CreateSimpleButton(
-                    "modernbox_page_" + page,
-                    () => ShowPage(page),
-                    Resources.Load<Sprite>(PageIcon(page)),
-                    _tab.transform,
-                    GridPosition(i));
-                PowerButtonCreator.AddButtonToTab(pageButton, _tab, null);
-                HubControls.Add(pageButton.gameObject);
-            }
-
-            ModernLocalization.Add("modernbox_page_back", "Back");
-            ModernLocalization.Add("modernbox_page_back_description", "Return to the M2 category hub.");
-            PowerButton backButton = PowerButtonCreator.CreateSimpleButton(
-                "modernbox_page_back",
-                () => ShowHub(true),
-                Resources.Load<Sprite>("ui/Icons/Reset"),
-                _tab.transform,
-                new Vector2(36f, 36f));
-            PowerButtonCreator.AddButtonToTab(backButton, _tab, null);
-            _backButton = backButton.gameObject;
-
-            CreateProgressionPage();
-            CreateArmyPage();
-            CreateUnitPage();
-            CreateEquipmentPage();
-            CreateBombPage();
-            CreateInvasionPage();
-            CreateSettingsPage();
-        }
-
-        private static void CreateProgressionPage()
-        {
-            AddToggle("Progression", "modernbox_toggle_ProgressionOption", Resources.Load<Sprite>("ui/Icons/Renaissance"), "Standard Era Progression", "The whole world advances together after 50-200 world years per era. Buildings, armies, factories, equipment, and civilization visuals are restricted to the current world era.", 0, "ProgressionOption");
-            AddToggle("Progression", "modernbox_toggle_ConstructionOption", Resources.Load<Sprite>("ui/Icons/Skyscraper"), "M2 Construction", "Allow all four civilizations to build M2 civilian structures, factories, and era upgrades.", 1, "ConstructionOption");
-        }
-
-        private static void CreateArmyPage()
-        {
-            int index = 0;
-            AddToggle("Armies", "modernbox_toggle_FactoriesOption", Resources.Load<Sprite>("ui/Icons/Factories"), "Army and Factory Production", "Master toggle for M2 military production.", index++, "FactoriesOption");
-            foreach (FactorySpec factory in ContentRegistry.Factories)
-            {
-                string key = factory.SettingKey;
-                AddToggle("Armies", "modernbox_toggle_" + key, Resources.Load<Sprite>(FactoryIcon(factory.BuildingId)), FactoryToggleTitle(factory), FactoryToggleDescription(factory), index++, key);
-            }
-            AddToggle("Armies", "modernbox_toggle_NukeOption", Resources.Load<Sprite>("ui/Icons/Nuke"), "Wartime Nuclear Silos", "Allow 32-second MissileSilo launches only against kingdoms currently at war. Off by default.", index, "NukeOption");
-        }
-
-        private static void CreateUnitPage()
-        {
-            int index = 0;
-            for (int i = 0; i < ContentRegistry.Units.Count; i++)
-            {
-                ModernUnitSpec unit = ContentRegistry.Units[i];
-                if (unit.Role == M2UnitRole.Creature) continue;
-                AddGodPower("Units", "modernbox_spawn_" + unit.Id, Resources.Load<Sprite>(unit.IconPath), index++);
+                while (!Config.game_loaded) yield return null;
+                yield return new WaitForSeconds(1f);
+                M2Windows.Show("SaveSystemWindow");
             }
         }
 
-        private static void CreateBombPage()
+        // Buttons go in column by column (top then bottom), the game lays them out in that order.
+        private static void CreateButtons()
         {
-            for (int i = 0; i < ContentRegistry.Bombs.Count; i++)
-            {
-                BombSpec bomb = ContentRegistry.Bombs[i];
-                AddGodPower("Bombs", bomb.Id + "button", Resources.Load<Sprite>(bomb.IconPath), i);
-            }
+            // x 72
+            AddClick("galaxy", "ui/Icons/Galaxy", "Star Map", "View a map of everything.", M2Hooks.OpenStarMap);
+            AddClick("what", "ui/Icons/wat", "Coming soon", "COMING SOON", null);
+            // x 108
+            AddGodPowerIfThere("arrowleft2", "ui/Icons/Arrowleft", "Choose Units", "Select the units you want to send to space.");
+            AddGodPowerIfThere("arrowleft3", "ui/Icons/Arrowright", "Land Units", "Land Units on your planet.");
+            // x 144
+            AddSpace(2);
+            // x 180
+            AddClick("about", "ui/Icons/Guide", "Guide", "Read the guide on how ModernBox works.", () => M2Windows.Show("GuideWindow"));
+            AddClick("discord_server", "ui/Icons/DiscordServer", "Discord Server", "Click this to join the ModernBox Discord server!", M2Windows.OpenDiscord);
+            // x 216
+            AddClick("ResetSettings", "ui/Icons/Reset", "Reset to defaults", "Resets ALL saved settings to their default values.", ResetToDefaults);
+            AddClick("credits", "ui/icons/iconabout", "Credits", "All the people behind ModernBox and more!", () => M2Windows.Show("CreditsWindow"));
+            // x 252
+            AddToggle("other_names_toggle", "ui/Icons/tabIconModernWarfare", "Modern Names for Other Races.", "Enable or Disable First and Last names for other races..", "othernamesOption");
+            AddToggle("names_toggle", "ui/Icons/name_1", "Modern Names", "Enable or Disable Modern Names.", "namesOption");
+            // x 288
+            _tabTextLeft = AddClick("MedievalWindow", "ui/Icons/Bomber", "Medieval Units Menu", "Tis but a scratch", () => M2Windows.Show("Medieval Unit Spawner"));
+            AddClick("TechWindow", "ui/Icons/Renaissance", "Technologies", "See the era and techs of each culture.", M2TechWindow.Open);
+            // x 324 - 468, the TabText picture sits here
+            AddSpace(10);
+            // x 504
+            _tabTextRight = AddBomb("Ultron", "ui/Icons/Ultron", "Ultron Bomb", "WOOOAH");
+            AddToggle("Nuke_toggle", "effects/projectiles/NUKER/0", "Toggle Nuke Silos", "(GREEN MEANS ON, GREY IS OFF) Toggles if kingdoms can nuke each other.", "NukeOption");
+            // x 540
+            AddBomb("Mini", "ui/Icons/Mini", "Mini Nuke", "Small nukes, great for minor scuffles.");
+            AddBomb("Cobalt", "ui/Icons/Cobalt", "Cobalt Bomb", "Small Mushroom but huge radius, watch out with this one.");
+            // x 576
+            AddBomb("MOAB", "ui/Icons/MOAB", "Super-Nuke", "Also known as the 'Lag Bomb'.");
+            AddBomb("Xenium", "ui/Icons/Xeno", "Xenium Bomb", "You thought the ultron bomb was big? This thing is HUGE.");
+            // x 612
+            AddBomb("Death", "ui/Icons/Death", "Death Bomb", "Such an original name.");
+            AddBomb("Jupiter", "ui/Icons/Jupiter", "Jupiter Bomb", "The new monster.");
+            // x 648
+            AddBomb("Random", "ui/Icons/wat", "Random Bomb", "You could be dropping a proton bomb, or a mini nuke, it's random!");
+            AddBomb("Eraser", "ui/Icons/Eraser", "Eraser Bomb", "also known as the overcompensating bomb.");
+            // x 684, the alien only shows up sometimes
+            if (UnityEngine.Random.value <= 0.2f) AddGodPower("modernbox_spawn_Xiexel", "ui/Icons/alien", "ALIEN EMOJI", "OH NO YOU GOT AN EASTER EGG!");
+            else AddSpace(1);
+            AddClick("BombMenu", "ui/Icons/Bomber", "Bomb Menu", "Tux and Dank got bored and added a lot of extra bombs....", () => M2Windows.Show("EXTRA BOMBS"));
+            // x 720 - 1224 were the factory buttons, those are commented out in M2
+            AddSpace(30);
+            // x 1260
+            AddToggle("Devmode", "ui/Icons/tabIconModernWarfare", "Toggle Developer Mode", "Secret stuff", "Developer_Mode");
+            AddSpace(1);
+            // x 1296
+            AddGodPower("modernbox_spawn_Assimilatus", "ui/Icons/AssimilatusIcon", "Cyber Boss", "Do not spawn in a 69km radius from the closest city, DO NOT, THIS IS NOT REVERSE PSYCHOLOGY, I SWEAR, DO NOT :3");
+            AddGodPower("modernbox_spawn_Cocytuswalker", "ui/Icons/Walker_TitanIcon", "Ice Walker Boss", "He came to worldbox to get away from Shinji, he do not trust what Shinji would do to him if he falls into a coma");
+
+            AddTabText();
         }
 
-        private static void CreateEquipmentPage()
+        private static void ResetToDefaults()
         {
-            AddToggle("Equipment", "modernbox_toggle_EquipmentOption", Resources.Load<Sprite>("ui/Icons/Suit"), "M2 Equipment", "Master toggle for M2 equipment crafting.", 0, "EquipmentOption");
-            AddToggle("Equipment", "modernbox_toggle_GunOption", Resources.Load<Sprite>("ui/Icons/firearm"), "Era Weapons and Armor", "Allow Renaissance, industrial, modern, and future equipment to be crafted at the matching culture era.", 1, "GunOption");
-            AddToggle("Equipment", "modernbox_toggle_PipeGunOption", Resources.Load<Sprite>("ui/Icons/lowfirearm"), "Pipe Weapons", "Allow Renaissance pipe weapons to be crafted.", 2, "PipeGunOption");
-            AddToggle("Equipment", "modernbox_toggle_CyberwareOption", Resources.Load<Sprite>("ui/Icons/SolarPoweredCyberBody"), "Cyberware", "Allow Sandevistan and TurboBooster to be crafted.", 3, "CyberwareOption");
-            AddToggle("Equipment", "modernbox_toggle_DrugsOption", Resources.Load<Sprite>("ui/Icons/Drugs"), "Drugs", "Allow Meth and Crack to be crafted.", 4, "DrugsOption");
-            AddToggle("Equipment", "modernbox_toggle_MIRVOption", Resources.Load<Sprite>("ui/Icons/MIRV"), "MIRV Crafting", "Allow MIRV and MIRVBomb crafting. MissileSystem combat remains independent.", 5, "MIRVOption");
-            AddToggle("Equipment", "modernbox_toggle_IdeologiesOption", Resources.Load<Sprite>("ui/Icons/Ideologies"), "M2 Ideologies", "Automatically assign Dynastic, Mercantile, Peoplewoven, Martial, or Chaosvolt and preserve inheritance.", 6, "IdeologiesOption");
-            AddToggle("Equipment", "modernbox_toggle_namesOption", Resources.Load<Sprite>("ui/Icons/name_1"), "M2 Names", "Use M2 race and military name generators.", 7, "namesOption");
+            M2Windows.Show("DefaultSettingsWindow");
+            ModernBoxSettings.Reset();
+            if (PowerButtonSelector.instance != null) PowerButtonSelector.instance.checkToggleIcons();
         }
 
-        private static void CreateInvasionPage()
+        private static Transform AddBomb(string bombId, string icon, string title, string description)
         {
-            AddToggle("Invasions", "modernbox_toggle_AutomaticInvasionsOption", Resources.Load<Sprite>("ui/Icons/Vatican"), "Automatic Invasions", "Allow bounded Hashbrown and Vatican automatic invasion checks. Off by default.", 0, "AutomaticInvasionsOption");
-            int index = 1;
-            foreach (ModernUnitSpec unit in ContentRegistry.Units)
-            {
-                if (unit.Role != M2UnitRole.Creature) continue;
-                AddGodPower("Invasions", "modernbox_spawn_" + unit.Id, Resources.Load<Sprite>(unit.IconPath), index++);
-            }
+            return AddGodPower(bombId + "button", icon, title, description);
         }
 
-        private static void CreateSettingsPage()
+        private static void AddGodPowerIfThere(string id, string icon, string title, string description)
         {
-            AddClick("Settings", "modernbox_open_diagnostics", Resources.Load<Sprite>("ui/Icons/FactoryJob"), "Diagnostics", "Open bounded developer diagnostics.", 0, () => ModernBoxRuntime.Instance.OpenDiagnostics());
-            AddToggle("Settings", "modernbox_toggle_StartupAudio", Resources.Load<Sprite>("ui/Icons/TabText"), "Startup Audio", "Play the bundled ModernBox startup audio on the next launch.", 1, "StartupAudio");
-            AddToggle("Settings", "modernbox_toggle_DeveloperDiagnostics", Resources.Load<Sprite>("ui/Icons/FactoryJob"), "Verbose Diagnostics", "Enable informational console diagnostics.", 2, "DeveloperDiagnostics");
+            if (AssetManager.powers.get(id) != null) AddGodPower(id, icon, title, description);
+            else AddSpace(1);
         }
 
-        private static void AddGodPower(string page, string id, Sprite icon, int index)
+        private static Transform AddGodPower(string id, string icon, string title, string description)
         {
-            Vector2 position = GridPosition(index);
-            PowerButton button = PowerButtonCreator.CreateGodPowerButton(id, icon, _tab.transform, position);
-            PowerButtonCreator.AddButtonToTab(button, _tab, null);
-            Pages[page].Add(button.gameObject);
-        }
-
-        private static void AddToggle(string page, string id, Sprite icon, string title, string description, int index, string setting)
-        {
-            ModernLocalization.Add(id, title);
-            ModernLocalization.Add(id + "_description", description);
-            Vector2 position = GridPosition(index);
-            string optionId = ModernBoxCatalog.Guid + "." + setting;
-            ToggleSettings[id] = setting;
-            SettingOptions[setting] = optionId;
-            EnsureNativeOption(optionId, ModernBoxSettings.Get(setting));
-
             GodPower power = AssetManager.powers.get(id);
             if (power == null)
             {
-                power = new GodPower { id = id };
+                AddSpace(1);
+                return null;
+            }
+            ModernLocalization.Add(id, title);
+            ModernLocalization.Add(id + "_description", description);
+            PowerButton button = PowerButtonCreator.CreateGodPowerButton(id, LoadIcon(icon, power), _tab.transform, Vector2.zero);
+            PowerButtonCreator.AddButtonToTab(button, _tab, null);
+            // The game greys out buttons with "Button" in their name.
+            if (button.icon != null) button.icon.color = Color.white;
+            Image background = button.GetComponent<Image>();
+            if (background != null) background.color = Color.white;
+            return button.transform;
+        }
+
+        private static Transform AddClick(string id, string icon, string title, string description, UnityAction action)
+        {
+            string buttonId = "modernbox_" + id;
+            ModernLocalization.Add(buttonId, title);
+            ModernLocalization.Add(buttonId + "_description", description);
+            PowerButton button = PowerButtonCreator.CreateSimpleButton(buttonId, action, Resources.Load<Sprite>(icon), _tab.transform, Vector2.zero);
+            PowerButtonCreator.AddButtonToTab(button, _tab, null);
+            return button.transform;
+        }
+
+        private static void AddToggle(string id, string icon, string title, string description, string setting)
+        {
+            string powerId = "modernbox_" + id;
+            ModernLocalization.Add(powerId, title);
+            ModernLocalization.Add(powerId + "_description", description);
+            string optionId = ModernBoxCatalog.Guid + "." + setting;
+            ToggleSettings[powerId] = setting;
+            SettingOptions[setting] = optionId;
+            EnsureOption(optionId, ModernBoxSettings.Get(setting));
+
+            Sprite sprite = Resources.Load<Sprite>(icon);
+            GodPower power = AssetManager.powers.get(powerId);
+            if (power == null)
+            {
+                power = new GodPower { id = powerId };
                 AssetManager.powers.add(power);
             }
-            power.name = id;
+            power.name = powerId;
             power.type = PowerActionType.PowerSpecial;
             power.rank = PowerRank.Rank0_free;
             power.path_icon = null;
-            power.sprite_icon = icon;
+            power.sprite_icon = sprite;
             power.ignore_cursor_icon = true;
             power.track_activity = false;
             power.toggle_name = optionId;
-            power.toggle_action = ToggleNativeSetting;
+            power.toggle_action = ToggleSetting;
 
-            PowerButton button = PowerButtonCreator.CreateToggleButton(id, icon, _tab.transform, position, true);
-            if (button == null) throw new InvalidOperationException("NML could not create native toggle button: " + id);
+            PowerButton button = PowerButtonCreator.CreateToggleButton(powerId, sprite, _tab.transform, Vector2.zero, true);
+            if (button == null)
+            {
+                AddSpace(1);
+                return;
+            }
             PowerButtonCreator.AddButtonToTab(button, _tab, null);
-            Pages[page].Add(button.gameObject);
             SyncNativeToggle(setting, ModernBoxSettings.Get(setting), false);
         }
 
-        private static void EnsureNativeOption(string optionId, bool value)
+        private static void AddSpace(int slots)
+        {
+            for (int i = 0; i < slots; i++)
+            {
+                GameObject space = new GameObject("_space", typeof(RectTransform));
+                space.transform.SetParent(_tab.transform, false);
+                ((RectTransform)space.transform).sizeDelta = new Vector2(32f, 32f);
+            }
+        }
+
+        private static void AddTabText()
+        {
+            GameObject picture = new GameObject("LargeImage", typeof(RectTransform));
+            picture.transform.SetParent(_tab.transform, false);
+            Image image = picture.AddComponent<Image>();
+            image.sprite = Resources.Load<Sprite>("ui/Icons/TabText");
+            image.raycastTarget = false;
+            RectTransform rect = image.rectTransform;
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = new Vector2(200f, 100f);
+            TabTextSpot spot = picture.AddComponent<TabTextSpot>();
+            spot.Left = _tabTextLeft;
+            spot.Right = _tabTextRight;
+        }
+
+        private static Sprite LoadIcon(string icon, GodPower power)
+        {
+            Sprite sprite = Resources.Load<Sprite>(icon);
+            if (sprite == null && power != null && !string.IsNullOrEmpty(power.path_icon)) sprite = Resources.Load<Sprite>(power.path_icon);
+            return sprite;
+        }
+
+        private static void EnsureOption(string optionId, bool value)
         {
             OptionAsset option = AssetManager.options_library.get(optionId);
             if (option == null)
@@ -220,122 +250,40 @@ namespace ModernBoxM2Rewrite
             }
         }
 
-        private static void ToggleNativeSetting(string powerId)
+        private static void ToggleSetting(string powerId)
         {
             string setting;
             if (!ToggleSettings.TryGetValue(powerId, out setting)) return;
-            ModernBoxSettings.Set(setting, !ModernBoxSettings.Get(setting));
+            bool value = !ModernBoxSettings.Get(setting);
+            ModernBoxSettings.Set(setting, value);
+            if (!value) return;
+            if (setting == "NukeOption") M2Windows.Show("NukeWindow");
+            else if (setting == "Developer_Mode") M2Windows.Show("DeveloperWindow");
         }
 
         internal static void SyncNativeToggle(string setting, bool value, bool savePlayerConfig = true)
         {
             string optionId;
             if (!SettingOptions.TryGetValue(setting, out optionId)) return;
-            EnsureNativeOption(optionId, value);
+            EnsureOption(optionId, value);
             PlayerConfig.setOptionBool(optionId, value);
             if (savePlayerConfig) PlayerConfig.saveData();
             if (PowerButtonSelector.instance != null) PowerButtonSelector.instance.checkToggleIcons();
         }
+    }
 
-        private static void AddClick(string page, string id, Sprite icon, string title, string description, int index, UnityEngine.Events.UnityAction action)
+    // Keeps the TabText picture between the Medieval button and the bombs, like in M2.
+    internal sealed class TabTextSpot : MonoBehaviour
+    {
+        internal Transform Left;
+        internal Transform Right;
+
+        private void LateUpdate()
         {
-            ModernLocalization.Add(id, title);
-            ModernLocalization.Add(id + "_description", description);
-            Vector2 position = GridPosition(index);
-            PowerButton button = PowerButtonCreator.CreateSimpleButton(id, action, icon, _tab.transform, position);
-            PowerButtonCreator.AddButtonToTab(button, _tab, null);
-            Pages[page].Add(button.gameObject);
-        }
-
-        private static Vector2 GridPosition(int index)
-        {
-            const int columns = 16;
-            return new Vector2(72f + 36f * (index % columns), 36f - 36f * (index / columns));
-        }
-
-        private static void ShowHub(bool animate)
-        {
-            if (_showingHub) return;
-
-            foreach (GameObject control in HubControls)
-                if (control != null) control.SetActive(true);
-
-            foreach (KeyValuePair<string, List<GameObject>> pair in Pages)
-                foreach (GameObject item in pair.Value)
-                    if (item != null) item.SetActive(false);
-
-            if (_backButton != null) _backButton.SetActive(false);
-            _activePage = null;
-            _showingHub = true;
-            AnimateSubtab(animate);
-        }
-
-        private static void ShowPage(string page)
-        {
-            if (!Pages.ContainsKey(page) || (!_showingHub && string.Equals(_activePage, page, StringComparison.Ordinal))) return;
-
-            foreach (GameObject control in HubControls)
-                if (control != null) control.SetActive(false);
-
-            foreach (KeyValuePair<string, List<GameObject>> pair in Pages)
-                foreach (GameObject item in pair.Value)
-                    if (item != null) item.SetActive(pair.Key == page);
-
-            if (_backButton != null) _backButton.SetActive(true);
-            _activePage = page;
-            _showingHub = false;
-            AnimateSubtab(true);
-        }
-
-        private static void AnimateSubtab(bool animate)
-        {
-            if (!animate || _tab == null) return;
-
-            _tab.transform.DOKill(true);
-            _tab.transform.localScale = new Vector3(0.2f, 0.9f, 0.9f);
-            _tab.transform.DOScale(Vector3.one, PowersTab.scale_time).SetEase(Ease.OutBack);
-            MusicBox.playSoundUI("event:/SFX/UI/ThumbnailsSlide");
-        }
-
-        private static string FactoryIcon(string buildingId)
-        {
-            if (buildingId == "$era_barracks$") return "ui/Icons/Soldier";
-            if (buildingId == "AirFactory") return "ui/Icons/MIRVBomber";
-            if (buildingId == "AirshipFactory") return "ui/Icons/Airship";
-            if (buildingId == "HelicopterFactory") return "ui/Icons/Heli";
-            if (buildingId == "BoiFactory") return "ui/Icons/Nuke";
-            return "ui/Icons/" + buildingId.Replace("Factory", string.Empty);
-        }
-
-        private static string FactoryToggleTitle(FactorySpec factory)
-        {
-            switch (factory.BuildingId)
-            {
-                case "$era_barracks$": return "Era Barracks Armies";
-                case "AirFactory": return "MIRV Bomber Factories";
-                case "BoiFactory": return "Missile System Factories";
-                default: return ActorsAndBuildingsRegistry.FriendlyName(factory.BuildingId) + " Production";
-            }
-        }
-
-        private static string FactoryToggleDescription(FactorySpec factory)
-        {
-            string units = factory.UnitIds.Length == 0 ? "race and era role-table units" : string.Join(" / ", factory.UnitIds);
-            return "Toggle whether civilized kingdoms produce " + units + " at " + ActorsAndBuildingsRegistry.FriendlyName(factory.BuildingId) + ".";
-        }
-
-        private static string PageIcon(string page)
-        {
-            switch (page)
-            {
-                case "Progression": return "ui/Icons/Renaissance";
-                case "Armies": return "ui/Icons/Factories";
-                case "Units": return "ui/Icons/Tank";
-                case "Bombs": return "ui/Icons/MOAB";
-                case "Equipment": return "ui/Icons/firearm";
-                case "Invasions": return "ui/Icons/Vatican";
-                default: return "ui/Icons/Reset";
-            }
+            if (Left == null || Right == null) return;
+            Vector3 left = Left.localPosition;
+            Vector3 right = Right.localPosition;
+            transform.localPosition = new Vector3((left.x + right.x) / 2f, right.y, 0f);
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using NCMS.Utils;
@@ -9,18 +9,15 @@ namespace ModernBoxM2Rewrite
 {
     internal static class EquipmentAndTraitsRegistry
     {
-        private const string ItemNameGeneratorId = "ModernBox_Item_Names";
-
         internal static readonly string[] IdeologyIds =
         {
             "Dynastic", "Mercantile", "Peoplewoven", "Martial", "Chaosvolt"
         };
 
-        private static readonly HashSet<string> SapientSpeciesIds = new HashSet<string>(StringComparer.Ordinal)
+        internal static readonly HashSet<string> SapientSpeciesIds = new HashSet<string>(StringComparer.Ordinal)
         {
             "human", "orc", "elf", "dwarf"
         };
-        private static bool _ideologyLoadHooksRegistered;
 
         internal static void RegisterResourcesAndProjectiles()
         {
@@ -185,10 +182,10 @@ namespace ModernBoxM2Rewrite
 
         internal static void RegisterEquipment()
         {
-            RegisterItemNameGenerator();
             foreach (EquipmentSpec spec in ContentRegistry.Equipment)
             {
-                string template = spec.Type == EquipmentType.Weapon ? "$range" :
+                bool melee = ContentRegistry.IsMeleeEquipment(spec.Id);
+                string template = spec.Type == EquipmentType.Weapon ? (melee ? "$melee" : "$range") :
                     spec.Type == EquipmentType.Ring ? "$ring" :
                     spec.Type == EquipmentType.Armor ? "$armor" :
                     spec.Type == EquipmentType.Helmet ? "$helmet" :
@@ -196,10 +193,8 @@ namespace ModernBoxM2Rewrite
                 EquipmentAsset item = AssetManager.items.clone(spec.Id, template);
                 item.id = spec.Id;
                 item.translation_key = spec.Id;
-                // ItemAsset.getRandomNameTemplate assumes this list is non-null, even
-                // for ordinary-quality equipment when a generated modifier requests a
-                // name. The generic $range/$ring/$amulet bases do not provide one.
-                item.name_templates = new List<string> { ItemNameGeneratorId };
+                // ItemAsset.getRandomNameTemplate assumes this list is non-null.
+                item.name_templates = new List<string> { NameTemplate(spec) };
                 item.equipment_type = spec.Type;
                 item.equipment_subtype = spec.Type == EquipmentType.Weapon ? "stick" :
                     spec.Type == EquipmentType.Ring ? "ring" : spec.Type.ToString().ToLowerInvariant();
@@ -216,7 +211,7 @@ namespace ModernBoxM2Rewrite
                 item.metallic = spec.Type == EquipmentType.Weapon;
                 item.colored = false;
                 item.projectile = spec.Projectile;
-                item.path_slash_animation = "effects/slashes/slash_punch";
+                item.path_slash_animation = SlashAnimation(spec.Id);
                 item.path_icon = ItemIcon(spec.Id);
                 // Never use a toolbar icon as a MIRV's world/held sprite.  The
                 // toolbar art includes its large square button background and
@@ -227,13 +222,6 @@ namespace ModernBoxM2Rewrite
                 item.path_gameplay_sprite = HasItemSprite(spec.Id) ? FirstItemSpritePath(spec.Id) : ItemIcon(spec.Id);
                 item.gameplay_sprites = LoadItemSprites(spec.Id);
                 PreloadHeldItemSprites(item);
-                item.base_stats["damage"] = spec.Damage;
-                item.base_stats["range"] = spec.Range;
-                item.base_stats["attack_speed"] = spec.AttackSpeed;
-                item.base_stats["accuracy"] = spec.Accuracy;
-                item.base_stats["targets"] = 1f;
-                item.base_stats["critical_chance"] = 0.12f;
-                item.base_stats["projectiles"] = spec.Id == "PipeShotgun" ? 6f : 1f;
                 foreach (KeyValuePair<string, float> pair in spec.BaseStats)
                 {
                     if (AssetManager.base_stats_library.get(pair.Key) == null)
@@ -245,14 +233,13 @@ namespace ModernBoxM2Rewrite
                 }
                 item.equipment_value = spec.Value;
                 item.rigidity_rating = spec.Type == EquipmentType.Weapon ? 4 : 2;
-                item.quality = Rarity.R0_Normal;
+                item.quality = spec.Id == "malorian" ? Rarity.R3_Legendary : Rarity.R0_Normal;
                 item.setCost(0, spec.Resource1, spec.Resource1Cost, spec.Resource2, spec.Resource2Cost);
                 item.minimum_city_storage_resource_1 = Math.Max(1, spec.Resource1Cost);
                 // Keep the manually loaded M1 material sprites. The vanilla pool preloader
                 // otherwise overwrites them by looking for a single combined texture path.
                 item.is_pool_weapon = false;
                 item.pool_rate = spec.Tier >= ProgressionTier.Strategic ? 3 : 12;
-                ApplyAccessoryStats(item, spec.Id);
                 if (spec.Type == EquipmentType.Weapon)
                 {
                     if (!AssetManager.items.pot_weapon_assets_all.Contains(item)) AssetManager.items.pot_weapon_assets_all.Add(item);
@@ -289,22 +276,6 @@ namespace ModernBoxM2Rewrite
                 if (sprite == null) continue;
                 DynamicSprites.preloadItemSprite(sprite, null);
             }
-        }
-
-        private static void RegisterItemNameGenerator()
-        {
-            if (AssetManager.name_generator.has(ItemNameGeneratorId))
-            {
-                EnsureCurrentNameGeneratorFields(AssetManager.name_generator.get(ItemNameGeneratorId));
-                return;
-            }
-            NameGeneratorAsset names = new NameGeneratorAsset { id = ItemNameGeneratorId };
-            names.addPartGroup("Guardian,Vanguard,Sentinel,Defender,Thunder,Lightning,Storm,Liberty,Victory,Iron,Steel,Crimson,Black,Silver,Golden");
-            names.addPartGroup(" ");
-            names.addPartGroup("Rifle,Carbine,Cannon,Launcher,Repeater,Sidearm,Weapon,System,Prototype,Mark");
-            names.addTemplate("part_group");
-            EnsureCurrentNameGeneratorFields(names);
-            AssetManager.name_generator.add(names);
         }
 
         private static void AddToCraftingSubtype(EquipmentAsset item)
@@ -404,31 +375,72 @@ namespace ModernBoxM2Rewrite
             return file == null ? null : "ui/Icons/items/" + System.IO.Path.GetFileNameWithoutExtension(file);
         }
 
-        private static void ApplyAccessoryStats(EquipmentAsset item, string id)
+        private static string SlashAnimation(string id)
         {
-            if (id == "Sandevistan")
+            if (id == "shieldedaxe") return "effects/slashes/slash_axe";
+            if (id == "shieldedhammer") return "effects/slashes/slash_hammer";
+            if (id == "shieldedspear") return "effects/slashes/slash_spear";
+            if (id == "shieldedsword" || id == "chainsaw" || id.EndsWith("lightsaber", StringComparison.Ordinal))
+                return "effects/slashes/slash_sword";
+            return "effects/slashes/slash_punch";
+        }
+
+        // Same vanilla name generators M2 assigned to each item.
+        private static string NameTemplate(EquipmentSpec spec)
+        {
+            switch (spec.Id)
             {
-                item.base_stats["speed"] = 100f;
-                item.base_stats["attack_speed"] = 80f;
-                item.base_stats["stamina"] = 25f;
+                case "shieldedaxe": return "axe_name";
+                case "shieldedhammer": return "hammer_name";
+                case "shieldedspear": return "spear_name";
             }
-            else if (id == "TurboBooster")
+            if (spec.Type == EquipmentType.Weapon) return ContentRegistry.IsMeleeEquipment(spec.Id) ? "sword_name" : "bow_name";
+            if (spec.Type == EquipmentType.Armor) return "armor_name";
+            if (spec.Type == EquipmentType.Helmet) return "helmet_name";
+            if (spec.Type == EquipmentType.Boots) return "boots_name";
+            return "ring_name";
+        }
+
+        // Port of M2's crafting choices: City_TryProduceItem_EpochPatch +
+        // CustomArmorEquipmentIDPatch forced the culture's era armor piece, and
+        // AddPreferredWeaponToCivRaces put M2 weapons in every civ race's pool.
+        // getItemAssetToCraft walks the list from the end, so M2 weapons go last
+        // in random order and are tried first.
+        internal static void ApplyM2CraftingChoice(List<EquipmentAsset> items, City city)
+        {
+            if (items == null || items.Count == 0 || !ModernProgression.IsSupportedCity(city)) return;
+            // City_TryProduceItem_EpochPatch picked the tier from Future/MilitaryModern/Firearms/Renaissance.
+            M2Era era = M2Tech.MilitaryEra(city.culture);
+            if (era < M2Era.Renaissance) return;
+            EquipmentType type = items[0].equipment_type;
+            if (type == EquipmentType.Armor || type == EquipmentType.Helmet || type == EquipmentType.Boots)
             {
-                item.base_stats["speed"] = 60f;
-                item.base_stats["stamina"] = 100f;
+                EquipmentSpec tierPiece = ContentRegistry.Equipment.Find(spec => spec.Type == type && spec.Era == era);
+                if (tierPiece == null || !ProductionService.IsEquipmentEnabled(tierPiece.Id, city)) return;
+                EquipmentAsset asset = AssetManager.items.get(tierPiece.Id);
+                if (asset == null) return;
+                items.Clear();
+                items.Add(asset);
+                return;
             }
-            else if (id == "Meth")
+            if (type != EquipmentType.Weapon) return;
+            items.RemoveAll(item => ModernBoxCatalog.EquipmentIds.Contains(item.id));
+            List<EquipmentAsset> modern = new List<EquipmentAsset>();
+            foreach (EquipmentSpec spec in ContentRegistry.Equipment)
             {
-                item.base_stats["speed"] = 40f;
-                item.base_stats["damage"] = 25f;
-                item.base_stats["health"] = -15f;
+                if (spec.Type != EquipmentType.Weapon || !ContentRegistry.PreferredWeapons.Contains(spec.Id)) continue;
+                if (!ProductionService.IsEquipmentEnabled(spec.Id, city)) continue;
+                EquipmentAsset asset = AssetManager.items.get(spec.Id);
+                if (asset != null) modern.Add(asset);
             }
-            else if (id == "Crack")
+            for (int i = modern.Count - 1; i > 0; i--)
             {
-                item.base_stats["attack_speed"] = 35f;
-                item.base_stats["armor"] = 20f;
-                item.base_stats["health"] = -30f;
+                int j = UnityEngine.Random.Range(0, i + 1);
+                EquipmentAsset swap = modern[i];
+                modern[i] = modern[j];
+                modern[j] = swap;
             }
+            items.AddRange(modern);
         }
 
         internal static void RegisterTraits()
@@ -440,21 +452,33 @@ namespace ModernBoxM2Rewrite
             AssetManager.trait_groups.add(vehicleGroup);
             AssetManager.trait_groups.add(ideologyGroup);
 
-            RegisterVehicleTrait("Jet", "ui/Icons/Plane", "Aircraft platform.", 0f);
-            RegisterVehicleTrait("Vehicle", "ui/Icons/tabIconModernWarfare", "A ModernBox vehicle.", -100f);
-            RegisterVehicleTrait("MIRVBoat", "ui/Icons/Boat", "ModernBox naval military unit.", -100f);
-            RegisterVehicleTrait("Helicopter", "ui/Icons/Heli", "Rotary-wing aircraft.", -100f);
-            RegisterVehicleTrait("Tank", "ui/Icons/Tank", "Armored ground vehicle.", -100f);
-            RegisterVehicleTrait("Railgun", "ui/Icons/Railgun", "Railgun platform.", -100f);
-            RegisterVehicleTrait("Humvee", "ui/Icons/Humvee", "Light military vehicle.", -100f);
-            RegisterVehicleTrait("Zeppelin", "ui/Icons/Airship", "Large airship.", -100f);
-            RegisterVehicleTrait("spawnedvehicle", "ui/Icons/tabIconModernWarfare", "Produced ModernBox military unit.", -100f);
-            RegisterVehicleTrait("SupportRole", "ui/Icons/SolarPoweredCyberBody", "Military support role.", -100f);
+            // Original M2 vehicle traits are stat-free markers (all stats 0).
+            RegisterVehicleTrait("exhausted", "ui/Icons/Humvee", "exhausted");
+            RegisterVehicleTrait("spawnedvehicle", "ui/Icons/Humvee", "spawnedvehicle");
+            RegisterVehicleTrait("Jet", "ui/Icons/Plane", "Fly through the sky...");
+            RegisterVehicleTrait("MIRVBoat", "ui/Icons/Boat", "He's a armored boy");
+            RegisterVehicleTrait("Helicopter", "ui/Icons/Heli", "HELICOPTER HELICOPTER BRRRRRRRRRRRR");
+            RegisterVehicleTrait("Tank", "ui/Icons/Tank", "Armoured Vehicle.");
+            RegisterVehicleTrait("Railgun", "ui/Icons/Railgun", "Armoured Vehicle.");
+            RegisterVehicleTrait("Humvee", "ui/Icons/Humvee", "Awesome military vehicle.");
+            RegisterVehicleTrait("Zeppelin", "ui/Icons/Airship", "Big airship.");
+            RegisterVehicleTrait("SupportRole", "ui/Icons/SolarPoweredCyberBody", "Heals and cures nearby allies");
+            ActorTrait supportRole = AssetManager.traits.get("SupportRole");
+            supportRole.action_special_effect = M2VehicleBehaviours.FriendlyAuraEffect;
+            supportRole.special_effect_interval = 5f;
 
             // These traits drove M2's non-space simulation systems. Their
             // callbacks are implemented by M2LegacyBehaviorService so the
             // original behavior remains bounded and save-safe on build 719.
-            RegisterLegacyBehaviorTrait("Unitpotential", "ui/Icons/UnitpotentialIcon", "Allows the expanded civilization unit roster and veteran vehicle upgrades.");
+            RegisterLegacyBehaviorTrait("Unitpotential", "ui/Icons/UnitpotentialIcon", "Allows expanded unit roster for civs. Cool stuff");
+            ActorTrait unitPotential = AssetManager.traits.get("Unitpotential");
+            if (unitPotential != null)
+            {
+                unitPotential.can_be_given = false;
+                unitPotential.can_be_removed = false;
+                unitPotential.base_stats["offspring"] = -99999f;
+                unitPotential.action_special_effect = M2VehicleBehaviours.NomadHandlerEffect;
+            }
             RegisterLegacyBehaviorTrait("Potential", "ui/Icons/PotentialIcon", "May evolve into a stronger M2 form when its conditions are met.");
             RegisterLegacyBehaviorTrait("AssimilatorSpawner", "ui/Icons/AssimilatorSpawner", "Creates Assimilator production cores.");
             RegisterLegacyBehaviorTrait("IceTowerSpawner", "ui/Icons/IceTowerSpawner", "Creates one Ice Walker production or defense tower per chunk during winter.");
@@ -477,23 +501,35 @@ namespace ModernBoxM2Rewrite
                     base_stats = new BaseStats(),
                     path_icon = IdeologyIcon(id),
                     group_id = "IdeologyBox",
-                    type = TraitType.Other,
+                    type = TraitType.Positive,
                     can_be_given = true,
                     can_be_removed = true,
                     can_be_cured = false,
-                    rate_birth = ModernBoxSettings.Get("IdeologiesOption") ? 37 : 0,
-                    rate_inherit = ModernBoxSettings.Get("IdeologiesOption") ? 100 : 0,
+                    rate_birth = 0,
+                    rate_inherit = 0,
                     rate_acquire_grow_up = 0,
                     is_mutation_box_allowed = true
                 };
                 ApplyIdeologyStats(trait, id);
                 foreach (string opposite in IdeologyIds) if (opposite != id) trait.addOpposite(opposite);
-                AddTraitLocale(id, id, "A ModernBox political ideology.");
+                AddTraitLocale(id, id, IdeologyDescription(id));
                 trait.cached_sprite = LoadWorldSafeTraitIcon(trait.path_icon, id);
                 AssetManager.traits.add(trait);
                 trait.unlock(true);
             }
-            RegisterIdeologyLoadHooks();
+            M2Ideologies.Register();
+        }
+
+        private static string IdeologyDescription(string id)
+        {
+            switch (id)
+            {
+                case "Dynastic": return "LONG LIVE THE KING!!!!";
+                case "Mercantile": return "The very best prices, the yugest golden toilets, and the bestest hairstyles!";
+                case "Peoplewoven": return "WE HAVE COME TO THE ONLY PLACE NOT YET CORRUPTED BY MERCANTILES, SPACEBOX!";
+                case "Martial": return "TUXXEDAN TECHNOLOGY IS THE BEST!!!";
+                default: return "THE CHAINS ARE BROKEN, THE PEOPLE RISE!";
+            }
         }
 
         private static void ApplyIdeologyStats(ActorTrait trait, string id)
@@ -502,84 +538,47 @@ namespace ModernBoxM2Rewrite
             {
                 trait.base_stats["lifespan"] = 30f; trait.base_stats["intelligence"] = -2f;
                 trait.base_stats["diplomacy"] = 10f; trait.base_stats["stewardship"] = 10f;
-                trait.base_stats["loyalty_mood"] = 15f; trait.base_stats["offspring"] = -0.15f;
+                trait.base_stats["loyalty_traits"] = 15f; trait.base_stats["multiplier_offspring"] = -0.15f;
             }
             else if (id == "Mercantile")
             {
                 trait.base_stats["intelligence"] = 5f; trait.base_stats["diplomacy"] = 10f;
-                trait.base_stats["opinion"] = 10f; trait.base_stats["loyalty_mood"] = 15f; trait.base_stats["cities"] = -3f;
+                trait.base_stats["opinion"] = 10f; trait.base_stats["loyalty_traits"] = 15f; trait.base_stats["cities"] = -3f;
             }
             else if (id == "Peoplewoven")
             {
                 trait.base_stats["intelligence"] = 5f; trait.base_stats["warfare"] = 10f;
                 trait.base_stats["diplomacy"] = 5f; trait.base_stats["stewardship"] = 3f;
-                trait.base_stats["opinion"] = 10f; trait.base_stats["loyalty_mood"] = -50f; trait.base_stats["cities"] = 3f;
+                trait.base_stats["opinion"] = 10f; trait.base_stats["loyalty_traits"] = -50f; trait.base_stats["cities"] = 3f;
             }
             else if (id == "Martial")
             {
                 trait.base_stats["intelligence"] = 5f; trait.base_stats["warfare"] = 20f;
                 trait.base_stats["diplomacy"] = -10f; trait.base_stats["stewardship"] = 5f;
-                trait.base_stats["opinion"] = -20f; trait.base_stats["loyalty_mood"] = -50f; trait.base_stats["cities"] = 3f;
+                trait.base_stats["opinion"] = -20f; trait.base_stats["loyalty_traits"] = -50f; trait.base_stats["cities"] = 3f;
             }
             else
             {
                 trait.base_stats["lifespan"] = -10f; trait.base_stats["attack_speed"] = 15f;
                 trait.base_stats["intelligence"] = -5f; trait.base_stats["warfare"] = 20f;
                 trait.base_stats["diplomacy"] = -500f; trait.base_stats["stewardship"] = -400f;
-                trait.base_stats["opinion"] = -800f; trait.base_stats["loyalty_mood"] = -10000f; trait.base_stats["cities"] = -100f;
+                trait.base_stats["opinion"] = -800f; trait.base_stats["loyalty_traits"] = -10000f; trait.base_stats["cities"] = -100f;
             }
-        }
-
-        private static void RegisterIdeologyLoadHooks()
-        {
-            if (_ideologyLoadHooksRegistered) return;
-            foreach (string speciesId in SapientSpeciesIds)
-            {
-                ActorAsset species = AssetManager.actor_library.get(speciesId);
-                if (species != null) species.action_on_load += EnsureLoadedIdeology;
-            }
-            _ideologyLoadHooksRegistered = true;
-        }
-
-        private static void EnsureLoadedIdeology(Actor actor)
-        {
-            EnsureDefaultIdeology(actor);
         }
 
         internal static bool EnsureDefaultIdeology(Actor actor)
         {
-            return EnsureDefaultIdeology(actor, actor == null ? null : actor.asset);
-        }
-
-        internal static bool EnsureDefaultIdeology(Actor actor, ActorAsset species)
-        {
-            if (!ModernBoxSettings.Get("IdeologiesOption") || actor == null || species == null ||
-                !SapientSpeciesIds.Contains(species.id)) return false;
+            // Original birth roll: each ideology is rolled once at birth with its
+            // own chance (10%, Chaosvolt 8%). Opposites block a second ideology.
+            if (!ModernBoxSettings.Get("IdeologiesOption") || actor == null || actor.asset == null ||
+                !SapientSpeciesIds.Contains(actor.asset.id)) return false;
+            bool added = false;
             foreach (string ideologyId in IdeologyIds)
-            {
-                if (actor.hasTrait(ideologyId)) return false;
-            }
-
-            // Stable assignment avoids perturbing WorldBox's simulation RNG and
-            // gives an even distribution across long-lived populations.
-            long actorId = actor.getID();
-            int index = (int)(actorId % IdeologyIds.Length);
-            if (index < 0) index += IdeologyIds.Length;
-            return actor.addTrait(IdeologyIds[index], true);
+                if (Randy.randomChance(M2Ideologies.BirthRate(ideologyId) / 100f) && actor.addTrait(ideologyId)) added = true;
+            return added;
         }
 
-        internal static int BackfillDefaultIdeologies()
-        {
-            if (!ModernBoxSettings.Get("IdeologiesOption") || World.world == null || World.world.units == null) return 0;
-            int assigned = 0;
-            foreach (Actor actor in World.world.units)
-            {
-                if (EnsureDefaultIdeology(actor)) assigned++;
-            }
-            return assigned;
-        }
-
-        private static void RegisterVehicleTrait(string id, string icon, string description, float fertility)
+        private static void RegisterVehicleTrait(string id, string icon, string description)
         {
             ActorTrait trait = new ActorTrait
             {
@@ -587,7 +586,7 @@ namespace ModernBoxM2Rewrite
                 base_stats = new BaseStats(),
                 path_icon = icon,
                 group_id = "ModernBox",
-                type = TraitType.Other,
+                type = TraitType.Negative,
                 can_be_given = false,
                 can_be_removed = false,
                 can_be_cured = false,
@@ -687,14 +686,18 @@ namespace ModernBoxM2Rewrite
 
         internal static void RegisterNames()
         {
-            AddNames("Modern_human_Names", "Arthur,Samantha,William,Michael,Nancy,Robert,Natasha,Iris,Grace,Viktor,Bradley,Francesco,Magnus,Marc,Jerome,Angel,Dexter,Mitchell,Russell,Walker,Harper,Pearce,George,Archer,John,Finn,Lucas,Charles,Martin", "Tucker,Ford,Mitchell,Russell,Walker,Harper,Pearce,Stephenson,Erickson,King,Larson,Goodwin,Garner,Bonaparte,Dubois,Duval,Richard,Marino,Rommel,Weber,Braun,Wagner,Lee,Liang,Putin,Garcia,Williams");
-            AddNames("Modern_orc_Names", "Grommash,Thrakka,Grulok,Durgar,Morgash,Drakka,Krusk,Gornak,Thokk,Roktar,Azog,Garrosh", "Bloodaxe,Ironhide,Skullcrusher,Blackfang,Stonefist,Doomhammer,Ironskull,Warblade");
-            AddNames("Modern_elf_Names", "Lirael,Eledrin,Thalindra,Elowen,Galadriel,Lorandor,Ilyndor,Faelarion,Elanor,Lorien", "Silverleaf,Moonshadow,Starwhisper,Windrunner,Nightbloom,Frostfall,Sunblade,Swiftarrow");
-            AddNames("Modern_dwarf_Names", "Balin,Thorin,Dwalin,Gimli,Fili,Kili,Gloin,Durin,Brokk,Eitri,Hrothgar", "Ironbeard,Stoneforge,Graniteheart,Hammerstrike,Steelhelm,Oakenshield,Fireforge");
-            AddNames("Modern_Names", "Arthur,Samantha,William,Michael,Nancy,Robert,Natasha,Iris,Grace,Viktor,Bradley,Francesco,Magnus", "Tucker,Ford,Mitchell,Russell,Walker,Harper,Pearce,King,Larson,Goodwin");
+            AddNames("Modern_Names", M2Names.HumanFirst, M2Names.HumanLast);
+            AddNames("Modern_Orc_Names", M2Names.OrcFirst, M2Names.OrcLast);
+            AddNames("Modern_Elf_Names", M2Names.ElfFirst, M2Names.ElfLast);
+            AddNames("Modern_Dwarf_Names", M2Names.DwarfFirst, M2Names.DwarfLast);
+            // Aliases used by the era soldier actors.
+            AddNames("Modern_human_Names", M2Names.HumanFirst, M2Names.HumanLast);
+            AddNames("Modern_orc_Names", M2Names.OrcFirst, M2Names.OrcLast);
+            AddNames("Modern_elf_Names", M2Names.ElfFirst, M2Names.ElfLast);
+            AddNames("Modern_dwarf_Names", M2Names.DwarfFirst, M2Names.DwarfLast);
             AddCodeNames("Jet_Names", "F-,V-,X-,J-,S-");
             AddCodeNames("Humvee_Names", "H-");
-            AddCodeNames("MIRV_Names", "M-,R-,V-");
+            AddCodeNames("MIRV_Names", "F-,V-,X-,J-,S-");
 
             // These three IDs were vanilla NameGeneratorAssets in the pre-2025
             // game used by original M2. In 0.51.2 they can still appear in old

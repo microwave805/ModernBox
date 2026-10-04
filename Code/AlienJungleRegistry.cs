@@ -26,7 +26,7 @@ namespace ModernBoxM2Rewrite
                 tile_high = HighTileId,
                 grow_strength = 20,
                 spread_biome = true,
-                generator_pot_amount = 80,
+                generator_pot_amount = 0,
                 grow_vegetation_auto = true,
                 grow_type_selector_minerals = TileActionLibrary.getGrowTypeRandomMineral,
                 grow_type_selector_trees = TileActionLibrary.getGrowTypeRandomTrees,
@@ -42,14 +42,16 @@ namespace ModernBoxM2Rewrite
             biome.addUnit("geckoid", 5);
             biome.addUnit("peones", 5);
             biome.addUnit("xenodogo", 5);
-            biome.addMineral("mineral_silver", 6);
+            biome.addMineral("mineral_silver", 20);
+            biome.addMineral("mineral_bones", 20);
+            biome.addMineral("mineral_gems", 6);
+            biome.addMineral("mineral_metals", 6);
 
             AssetManager.biome_library.add(biome);
-            AssetManager.biome_library.addBiomeToPool(biome);
             RegisterTile(LowTileId, "infernal_low", biome, TileRank.Low, "#4affc8");
             RegisterTile(HighTileId, "infernal_high", biome, TileRank.High, "#00d695");
             ModernLocalization.Add(BiomeId, "Alien Jungle");
-            ModernLocalization.Add(BiomeId + "_description", "A luminous alien ecosystem with native M2 fauna and vegetation.");
+            ModernLocalization.Add(BiomeId + "_description", "A strange jungle from another planet.");
         }
 
         private static void RegisterVegetation()

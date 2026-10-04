@@ -10,7 +10,11 @@ namespace ModernBoxM2Rewrite
 {
     internal static class ActorsAndBuildingsRegistry
     {
-        private const string FallbackKingdomId = "ModernKingdom";
+        internal const string ModernKingdomId = "ModernKingdom";
+        internal const string NomadsModernKingdomId = "nomads_ModernKingdom";
+        internal const string MissileLauncherKingdomId = "MissileLauncherFULLRANGETARGETTING";
+        internal const string JetRaceKingdomId = "JetRaceKingdom";
+        private const string FallbackKingdomId = ModernKingdomId;
         private const string InvasionKingdomId = "ModernBoxM2Invasion";
         internal const string AssimilatorKingdomId = "ModernBoxM2Assimilators";
         internal const string WalkerKingdomId = "ModernBoxM2Walkers";
@@ -54,6 +58,9 @@ namespace ModernBoxM2Rewrite
                 actor.name_locale = spec.Id;
                 actor.collective_term = "units";
                 actor.use_phenotypes = false;
+                // The old game recoloured every unit's magenta team pixels. 0.51.2 only does it for
+                // assets that ask for it, and $basic_unit$ doesn't, so M2 vehicles showed raw pink.
+                actor.need_colored_sprite = true;
                 actor.is_humanoid = spec.Humanoid;
                 if (spec.Humanoid && !string.IsNullOrEmpty(spec.Race))
                 {
@@ -311,37 +318,84 @@ namespace ModernBoxM2Rewrite
                 // equipment container, including actors that never equip items.
                 // The basic unit template leaves it null for itemless vehicles.
                 actor.action_on_load += EnsureUnitRuntimeState;
-                foreach (string trait in spec.Traits)
-                {
-                    // Original M2 registered MIRVBoat as an assignable trait but did
-                    // not grant it to every naval actor. Generated rewrite specs did.
-                    if (spec.Boat && trait == "MIRVBoat") continue;
+                foreach (string trait in M2VehicleBehaviours.ConfigureOriginalActor(actor, spec))
                     actor.addTrait(trait);
-                }
                 ModernLocalization.Add(spec.Id, FriendlyName(spec.Id));
                 RegisterSpawnPower(spec);
             }
             M2LegacyBehaviorService.AttachActorTraits();
+            M2VehicleBehaviours.RegisterAll();
             RepairOrphanedUnits();
         }
 
         private static void RegisterFallbackKingdom()
         {
-            KingdomAsset fallback = AssetManager.kingdoms.get(FallbackKingdomId);
-            if (fallback == null)
+            // ModernKingdoms.cs: the hidden M2 kingdoms are hostile to every
+            // civilization race, and the races are hostile back.
+            string[] enemies = { ModernKingdomId, NomadsModernKingdomId, "human", "orc", "elf", "dwarf" };
+            RegisterModernKingdom(ModernKingdomId, false, false, enemies);
+            RegisterModernKingdom(NomadsModernKingdomId, true, false, enemies);
+            RegisterModernKingdom(MissileLauncherKingdomId, false, true, new[] { MissileLauncherKingdomId, "nomads_" + MissileLauncherKingdomId, "human", "orc", "elf", "dwarf" });
+            KingdomAsset nomads = AssetManager.kingdoms.get(NomadsModernKingdomId);
+            nomads.list_tags.Remove(NomadsModernKingdomId);
+            nomads.addTag(ModernKingdomId);
+
+            foreach (string race in new[] { "human", "orc", "elf", "dwarf" })
             {
-                // The abstract kingdom template has no color asset in build 719.
-                // Clone the concrete neutral wild kingdom so createWildKingdom()
-                // always receives a fully initialized color and tag collection.
-                fallback = AssetManager.kingdoms.clone(FallbackKingdomId, "neutral");
-                fallback.id = FallbackKingdomId;
-                fallback.neutral = false;
-                fallback.nature = false;
-                fallback.abandoned = false;
-                fallback.addTag(FallbackKingdomId);
-                fallback.addTag("civ");
+                KingdomAsset civ = AssetManager.kingdoms.get(race);
+                if (civ != null)
+                {
+                    civ.addEnemyTag(ModernKingdomId);
+                    civ._cached_enemies.Clear();
+                }
+                KingdomAsset nomad = AssetManager.kingdoms.get("nomads_" + race);
+                if (nomad != null)
+                {
+                    nomad.addEnemyTag(ModernKingdomId);
+                    nomad.addEnemyTag(NomadsModernKingdomId);
+                    nomad._cached_enemies.Clear();
+                }
+            }
+
+            // Registered by the original Aircraft.cs but never assigned to a unit.
+            if (AssetManager.kingdoms.get(JetRaceKingdomId) == null)
+            {
+                KingdomAsset jetRace = AssetManager.kingdoms.clone(JetRaceKingdomId, "neutral");
+                jetRace.id = JetRaceKingdomId;
+                jetRace.neutral = false;
+                jetRace.nomads = true;
+                jetRace.mobs = true;
+                jetRace.friendly_tags.Clear();
+                jetRace.enemy_tags.Clear();
+                jetRace.list_tags.Clear();
+                jetRace.addTag(JetRaceKingdomId);
+                foreach (string race in new[] { "human", "dwarf", "elf", "orc" }) jetRace.addFriendlyTag(race);
             }
             EnsureFallbackKingdom();
+            EnsureWildKingdom(MissileLauncherKingdomId);
+        }
+
+        private static void RegisterModernKingdom(string id, bool nomads, bool fullRange, IEnumerable<string> enemies)
+        {
+            // Cloned from the concrete neutral kingdom so createWildKingdom()
+            // always receives an initialized colour asset.
+            KingdomAsset kingdom = AssetManager.kingdoms.get(id);
+            if (kingdom == null) kingdom = AssetManager.kingdoms.clone(id, "neutral");
+            kingdom.id = id;
+            kingdom.neutral = false;
+            kingdom.nature = false;
+            kingdom.abandoned = false;
+            kingdom.concept = false;
+            kingdom.nomads = nomads;
+            kingdom.count_as_danger = true;
+            kingdom.force_look_all_chunks = fullRange;
+            kingdom.friendly_tags.Clear();
+            kingdom.enemy_tags.Clear();
+            kingdom.list_tags.Clear();
+            kingdom._cached_enemies.Clear();
+            kingdom.addTag("civ");
+            kingdom.addTag(id);
+            foreach (string enemy in enemies) kingdom.addEnemyTag(enemy);
         }
 
         private static void RegisterInvasionKingdoms()
@@ -455,7 +509,7 @@ namespace ModernBoxM2Rewrite
             if (fallback == null)
             {
                 KingdomAsset asset = AssetManager.kingdoms.get(FallbackKingdomId);
-                fallback = asset == null ? null : World.world.kingdoms_wild.newWildKingdom(asset);
+                fallback = asset == null ? null : NewWild(asset);
             }
             InitializeFallbackKingdomData(fallback);
             return fallback;
@@ -513,6 +567,12 @@ namespace ModernBoxM2Rewrite
                 kingdom.data.banner_icon_id = 0;
         }
 
+        private static Kingdom NewWild(KingdomAsset asset)
+        {
+            M2Creatures.EnsureKingdomColor(asset);
+            return World.world.kingdoms_wild.newWildKingdom(asset);
+        }
+
         private static Kingdom EnsureWildKingdom(string id)
         {
             if (World.world == null || World.world.kingdoms_wild == null) return null;
@@ -520,7 +580,7 @@ namespace ModernBoxM2Rewrite
             if (invasion == null)
             {
                 KingdomAsset asset = AssetManager.kingdoms.get(id);
-                invasion = asset == null ? null : World.world.kingdoms_wild.newWildKingdom(asset);
+                invasion = asset == null ? null : NewWild(asset);
             }
             InitializeFallbackKingdomData(invasion);
             return invasion;
@@ -530,13 +590,26 @@ namespace ModernBoxM2Rewrite
         {
             if (World.world == null || World.world.units == null) return;
             Kingdom fallback = EnsureFallbackKingdom();
+            EnsureWildKingdom(MissileLauncherKingdomId);
             foreach (Actor actor in World.world.units)
             {
                 if (actor == null || actor.asset == null) continue;
+                TakeAwayHeldMirv(actor);
                 if (!ModernBoxCatalog.UnitIds.Contains(actor.asset.id)) continue;
                 if (actor.kingdom == null && fallback != null) actor.setKingdom(fallback);
                 EnsureUnitRuntimeState(actor);
             }
+        }
+
+        // MIRVs were never loot in M2; older port saves have citizens holding them.
+        private static void TakeAwayHeldMirv(Actor actor)
+        {
+            ActorEquipmentSlot slot = actor.equipment?.weapon;
+            if (slot == null || slot.isEmpty()) return;
+            Item item = slot.getItem();
+            if (item == null || item.asset == null || System.Array.IndexOf(ModernBoxCatalog.MirvIds, item.asset.id) < 0) return;
+            slot.takeAwayItem();
+            actor.clearSprites();
         }
 
         internal static void EnsureUnitRuntimeState(Actor actor)
@@ -547,7 +620,7 @@ namespace ModernBoxM2Rewrite
 
             ModernUnitSpec unitSpec = actor.asset == null
                 ? null
-                : ContentRegistry.Units.Find(candidate => candidate.Id == actor.asset.id);
+                : ContentRegistry.FindUnit(actor.asset.id);
             bool mechanicalUnit = IsMechanicalSpec(unitSpec);
             if (mechanicalUnit && actor.subspecies != null)
             {
@@ -618,7 +691,7 @@ namespace ModernBoxM2Rewrite
         internal static bool IsNonSleepingMechanicalActor(Actor actor)
         {
             if (actor == null || actor.asset == null) return false;
-            return IsMechanicalSpec(ContentRegistry.Units.Find(candidate => candidate.Id == actor.asset.id));
+            return IsMechanicalSpec(ContentRegistry.FindUnit(actor.asset.id));
         }
 
         internal static void MakeInvasionActor(Actor actor)
@@ -686,6 +759,8 @@ namespace ModernBoxM2Rewrite
         internal static string FactionForActorId(string actorId)
         {
             if (string.IsNullOrEmpty(actorId)) return null;
+            string creatureFaction = M2Creatures.WildFaction(actorId);
+            if (creatureFaction != null) return creatureFaction;
             if (actorId == "basecrusader" || actorId.StartsWith("crusader", StringComparison.OrdinalIgnoreCase)) return CrusaderKingdomId;
             if (actorId.StartsWith("zombie", StringComparison.OrdinalIgnoreCase)) return NativeUndeadKingdomId;
             if (actorId.StartsWith("assimil", StringComparison.OrdinalIgnoreCase) || actorId == "helilator" || actorId == "assizeppelin") return AssimilatorKingdomId;
@@ -892,7 +967,7 @@ namespace ModernBoxM2Rewrite
         {
             string actorId;
             if (tile == null || !SpawnPowerActors.TryGetValue(powerId, out actorId)) return false;
-            ModernUnitSpec spec = ContentRegistry.Units.Find(candidate => candidate.Id == actorId);
+            ModernUnitSpec spec = ContentRegistry.FindUnit(actorId);
             if (spec != null && spec.Role == M2UnitRole.Creature)
             {
                 Actor creature = World.world.units.spawnNewUnit(actorId, tile, true, true, spec.Flying ? 3f : 0f, null, false, true);
@@ -942,7 +1017,7 @@ namespace ModernBoxM2Rewrite
                     building.fundament = spec.Tower ? new BuildingFundament(4, 2, 2, 0) : new BuildingFundament(2, 2, 2, 0);
                 building.cost = spec.Cost;
                 building.priority = spec.UpgradeOnly ? 2500 : (spec.Tower ? 3750 : 69999);
-                building.base_stats["health"] = spec.Tower ? 2500f : 3000f;
+                building.base_stats["health"] = spec.Health;
                 building.base_stats["size"] = 1f;
                 // In build 719 both single and batch placement add zone-wide exclusion
                 // rules. Modern structures rely on the ordinary footprint check so a
@@ -971,11 +1046,21 @@ namespace ModernBoxM2Rewrite
                 if (spec.Tower)
                 {
                     building.tower = true;
-                    building.tower_projectile = spec.Id == "MissileSilo" ? "NUKER" : OriginalTowerProjectile(spec.Era);
-                    building.tower_projectile_amount = spec.Type == "watch_tower" && spec.Era == M2Era.Renaissance ? 4 : 1;
                     building.tower_projectile_offset = 4f;
-                    building.tower_projectile_reload = spec.Id == "MissileSilo" ? 32f : 64f;
                     building.tower_attack_buildings = true;
+                    if (spec.Id == "MissileSilo")
+                    {
+                        building.tower_projectile = "NUKER";
+                        building.tower_projectile_amount = 1;
+                        building.tower_projectile_reload = 32f;
+                        building.burnable = false;
+                        building.build_road_to = false;
+                    }
+                    else ApplyOriginalWatchTowerStats(building, spec.Era);
+                }
+                else if (spec.UpgradeOnly && spec.Type == "barracks")
+                {
+                    building.tower = false;
                 }
                 if (spec.Type == "dock") building.boat_types = DockBoats(spec.Era, spec.Race);
                 building.loadBuildingSprites();
@@ -1034,21 +1119,33 @@ namespace ModernBoxM2Rewrite
                 productionTower.spawn_units_asset = "newwalker";
             }
 
+            // Older port saves can hold MA9000 and F55 wrecks, which the original never made.
             foreach (string scrapId in ContentRegistry.Units
                 .Where(candidate => !string.IsNullOrEmpty(candidate.ScrapBuilding))
                 .Select(candidate => candidate.ScrapBuilding)
+                .Concat(new[] { "MA9000_scraps", "F55FighterJet_scraps" })
                 .Distinct(StringComparer.Ordinal))
             {
                 if (AssetManager.buildings.get(scrapId) != null) continue;
                 BuildingAsset scrap = AssetManager.buildings.clone(scrapId, "$building_civ_human$");
-                ConfigureLegacyWorldBuilding(scrap, scrapId, 350f);
+                ConfigureLegacyWorldBuilding(scrap, scrapId, 100f);
                 scrap.spawn_units = false;
                 scrap.spawn_units_asset = null;
                 scrap.housing_slots = 0;
                 scrap.can_units_live_here = false;
-                scrap.burnable = true;
                 scrap.can_be_demolished = true;
                 scrap.can_be_abandoned = false;
+                // Commerce.cs "scraps": a nature-owned metal pile units can harvest for 10 common metals.
+                scrap.kingdom = "nature";
+                scrap.burnable = false;
+                scrap.can_be_placed_on_liquid = true;
+                scrap.ignored_by_cities = true;
+                scrap.remove_ruins = true;
+                scrap.has_ruin_state = false;
+                scrap.has_ruins_graphics = false;
+                scrap.building_type = BuildingType.Building_Mineral;
+                scrap.has_resources_to_collect = true;
+                scrap.addResource("common_metals", 10, true);
                 ModernLocalization.Add(scrapId, FriendlyName(scrapId));
                 ModernLocalization.Add(scrapId + "_description", "The remains of a destroyed ModernBox unit.");
             }
@@ -1191,8 +1288,25 @@ namespace ModernBoxM2Rewrite
             return native == null ? "$building_civ_human$" : native.id;
         }
 
+        // UpgradesUwU.cs: M2 made the human house and hall tiers cheap (wood, stone, metals, gold).
+        private static void ApplyOriginalTierCosts()
+        {
+            SetCost("house_human_0", new ConstructionCost(1, 0, 0, 0));
+            for (int tier = 1; tier <= 4; tier++) SetCost("house_human_" + tier, new ConstructionCost(1, 1, 0, 0));
+            SetCost("house_human_5", new ConstructionCost(1, 1, 0, 1));
+            SetCost("hall_human_1", new ConstructionCost(1, 1, 0, 1));
+            SetCost("hall_human_2", new ConstructionCost(1, 1, 0, 1));
+        }
+
+        private static void SetCost(string id, ConstructionCost cost)
+        {
+            BuildingAsset asset = AssetManager.buildings.get(id);
+            if (asset != null) asset.cost = cost;
+        }
+
         private static void LinkEraUpgradeChains()
         {
+            ApplyOriginalTierCosts();
             foreach (BuildingUpgradeSpec upgrade in ContentRegistry.Upgrades)
             {
                 BuildingAsset target = AssetManager.buildings.get(upgrade.TargetId);
@@ -1201,14 +1315,22 @@ namespace ModernBoxM2Rewrite
                     : AssetManager.buildings.get(upgrade.SourceId);
                 if (source == null || target == null)
                     throw new InvalidOperationException("Missing M2 upgrade chain asset " + upgrade.SourceId + " -> " + upgrade.TargetId + ".");
+                UpgradeSources[target.id] = source.id;
+                // Original M2 only modernized the human building chains. The other
+                // race copies stay registered so existing saves keep loading.
+                if (!IsActiveUpgradeRace(upgrade.Race)) continue;
                 source.can_be_upgraded = true;
                 source.upgrade_to = target.id;
                 target.upgraded_from = source.id;
                 target.upgrade_level = source.upgrade_level + 1;
                 target.can_be_upgraded = !string.IsNullOrEmpty(ContentRegistry.Buildings.Find(candidate => candidate.Id == target.id).UpgradeTo);
                 target.upgrade_to = ContentRegistry.Buildings.Find(candidate => candidate.Id == target.id).UpgradeTo ?? string.Empty;
-                UpgradeSources[target.id] = source.id;
             }
+        }
+
+        internal static bool IsActiveUpgradeRace(string race)
+        {
+            return race == "human";
         }
 
         private static void AddCivilizationBuildOrders()
@@ -1224,13 +1346,9 @@ namespace ModernBoxM2Rewrite
                     if (spec.UpgradeOnly) continue;
                     string orderId = "order_m2_" + race + "_" + spec.Id;
                     species.architecture_asset.addBuildingOrderKey(orderId, spec.Id);
-                    if (orders.list.Any(order => string.Equals(order.id, orderId, StringComparison.Ordinal))) continue;
-                    int population, count;
-                    ModernProgression.GetRequirements((ProgressionTier)(int)spec.Era, out population, out count);
-                    BuildOrder order = orders.addBuilding(orderId, spec.Limit, population, count, false, false, 0);
-                    order.requirements_types = new[] { "type_bonfire" };
                 }
-                foreach (BuildingUpgradeSpec upgrade in ContentRegistry.Upgrades.Where(candidate => candidate.Race == race))
+                SiloLaunchEvents.RegisterOrder(race, orders);
+                foreach (BuildingUpgradeSpec upgrade in ContentRegistry.Upgrades.Where(candidate => candidate.Race == race && IsActiveUpgradeRace(race)))
                 {
                     string sourceId;
                     if (!UpgradeSources.TryGetValue(upgrade.TargetId, out sourceId)) continue;
@@ -1342,16 +1460,24 @@ namespace ModernBoxM2Rewrite
             }
         }
 
-        private static string OriginalTowerProjectile(M2Era era)
+        private static void ApplyOriginalWatchTowerStats(BuildingAsset tower, M2Era era)
         {
+            float damage, knockback, range, attackSpeed;
+            int amount = 1;
             switch (era)
             {
-                case M2Era.Renaissance: return "cannonballprojectile";
-                case M2Era.Industrial: return "shotgun_bullet";
-                case M2Era.Modern: return "artilleryshell";
-                case M2Era.Future: return "big_plasma_bomb";
-                default: return "arrow";
+                case M2Era.Renaissance: tower.tower_projectile = "cannonballprojectile"; damage = 20f; knockback = 2f; range = 20f; attackSpeed = 10f; amount = 4; break;
+                case M2Era.Industrial: tower.tower_projectile = "shotgun_bullet"; damage = 10f; knockback = 0f; range = 30f; attackSpeed = 10000f; break;
+                case M2Era.Modern: tower.tower_projectile = "artilleryshell"; damage = 200f; knockback = 6f; range = 100f; attackSpeed = 1f; break;
+                default: tower.tower_projectile = "big_plasma_bomb"; damage = 1000f; knockback = 3f; range = 50f; attackSpeed = 100f; break;
             }
+            tower.tower_projectile_amount = amount;
+            tower.base_stats["targets"] = 1f;
+            tower.base_stats["area_of_effect"] = 1f;
+            tower.base_stats["damage"] = damage;
+            tower.base_stats["knockback"] = knockback;
+            tower.base_stats["range"] = range;
+            tower.base_stats["attack_speed"] = attackSpeed;
         }
 
         private static string CurrentBoatBase(string actorId)
@@ -1372,10 +1498,9 @@ namespace ModernBoxM2Rewrite
 
         private static string BuildingDescription(BuildingSpec spec)
         {
-            if (spec.Id == "modernbuilding") return "An unlimited high-density residence that can be built directly or created by upgrading an ordinary human house.";
-            if (spec.Civilian) return "An unlimited modern civilian building for human cities.";
-            if (spec.Tower) return "A one-per-city nuclear missile silo.";
-            return "A one-per-city ModernBox production building.";
+            if (spec.Id == "MissileSilo") return "Launches nuclear missiles at enemies within range.";
+            if (spec.Legacy) return "An old ModernBox building. Cities no longer build it.";
+            return FriendlyName(spec.Id);
         }
     }
 }

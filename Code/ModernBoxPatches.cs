@@ -50,7 +50,7 @@ namespace ModernBoxM2Rewrite
             ActorAsset leaderAsset = leader.asset;
             ModernUnitSpec spec = leaderAsset == null
                 ? null
-                : ContentRegistry.Units.Find(candidate => candidate.Id == leaderAsset.id);
+                : ContentRegistry.FindUnit(leaderAsset.id);
 
             // Vehicles, aircraft, ships and invasion creatures must never drive a
             // civilization's species, biome or construction identity.
@@ -132,7 +132,7 @@ namespace ModernBoxM2Rewrite
 
             ModernUnitSpec spec = pActor.asset == null
                 ? null
-                : ContentRegistry.Units.Find(candidate => candidate.Id == pActor.asset.id);
+                : ContentRegistry.FindUnit(pActor.asset.id);
             if (spec != null && !spec.Humanoid)
                 return RetireInvalidKing(pActor);
 
@@ -265,7 +265,7 @@ namespace ModernBoxM2Rewrite
         private static bool Prefix(City __instance, Actor pActor)
         {
             if (__instance == null || pActor == null || pActor.asset == null) return true;
-            ModernUnitSpec spec = ContentRegistry.Units.Find(candidate => candidate.Id == pActor.asset.id);
+            ModernUnitSpec spec = ContentRegistry.FindUnit(pActor.asset.id);
             if (spec == null) return true;
 
             // Current City.makeWarrior always dereferences equipment.weapon. M2
@@ -585,6 +585,7 @@ namespace ModernBoxM2Rewrite
                 if (item == null) continue;
                 if (!ModernBoxCatalog.EquipmentIds.Contains(item.id) || ProductionService.IsEquipmentEnabled(item.id, pCity)) filtered.Add(item);
             }
+            EquipmentAndTraitsRegistry.ApplyM2CraftingChoice(filtered, pCity);
             pItemList = filtered;
         }
 
@@ -598,34 +599,24 @@ namespace ModernBoxM2Rewrite
         }
     }
 
-    [HarmonyPatch(typeof(ActorEquipmentSlot), nameof(ActorEquipmentSlot.setItem))]
-    internal static class DisabledMirvEquipPatch
+    // In 0.51.2 every warrior keeps crafting upgrades, and M2's long gun ladder means
+    // they drain a city's common metals to zero. Barracks and temples (2 metals) then
+    // never get built, so halls stop at tier 1 and houses never reach the M2 eras.
+    // Crafting leaves a reserve so construction can still afford its metals.
+    [HarmonyPatch(typeof(ItemCrafting), "hasEnoughResourcesToCraft")]
+    internal static class ItemCraftingMetalReservePatch
     {
-        [HarmonyPrefix]
-        private static bool Prefix(Item pItem)
-        {
-            // M2's MIRV toggle controls new crafting only. Existing equipment and
-            // MissileSystem combat must remain functional when crafting is disabled.
-            return true;
-        }
-    }
+        private const int Reserve = 10;
+        private const string Metals = "common_metals";
 
-    [HarmonyPatch(typeof(CityEquipment), nameof(CityEquipment.loadFromSave))]
-    internal static class DisabledMirvStorageLoadPatch
-    {
         [HarmonyPostfix]
-        private static void Postfix(City pCity)
+        private static void Postfix(EquipmentAsset pAsset, City pCity, ref bool __result)
         {
-        }
-    }
-
-    [HarmonyPatch(typeof(City), nameof(City.giveItem))]
-    internal static class DisabledMirvCityGivePatch
-    {
-        [HarmonyPrefix]
-        private static bool Prefix(City __instance, List<long> pItems, ref bool __result)
-        {
-            return true;
+            if (!__result || pAsset == null || pCity == null) return;
+            int cost = 0;
+            if (pAsset.cost_resource_id_1 == Metals) cost += pAsset.cost_resource_1;
+            if (pAsset.cost_resource_id_2 == Metals) cost += pAsset.cost_resource_2;
+            if (cost > 0 && pCity.getResourcesAmount(Metals) - cost < Reserve) __result = false;
         }
     }
 
@@ -669,7 +660,6 @@ namespace ModernBoxM2Rewrite
             if (!ModernProgression.IsSupportedCity(pCity)) return;
             List<BuildOrder> possible = ai.behaviours.CityBehBuild._possible_buildings;
             if (possible == null || possible.Count == 0) return;
-            M2Era era = ModernProgression.GetEra(pCity);
             for (int index = possible.Count - 1; index >= 0; index--)
             {
                 BuildOrder order = possible[index];
@@ -684,7 +674,7 @@ namespace ModernBoxM2Rewrite
                     if (order.id.StartsWith(prefix, System.StringComparison.Ordinal))
                         spec = ContentRegistry.Buildings.Find(candidate => candidate.Id == order.id.Substring(prefix.Length));
                 }
-                if (!ModernBoxSettings.Get("ConstructionOption") || spec == null || era < spec.Era) possible.RemoveAt(index);
+                if (!ModernBoxSettings.Get("ConstructionOption") || spec == null || !M2TechGates.CityAllowsBuilding(pCity, spec)) possible.RemoveAt(index);
             }
             int originalCount = possible.Count;
             for (int index = 0; index < originalCount; index++)
@@ -714,8 +704,7 @@ namespace ModernBoxM2Rewrite
 
             City city = __instance.city;
             if (!ModernBoxSettings.Get("ConstructionOption") ||
-                !ModernProgression.IsSupportedCity(city) ||
-                ModernProgression.GetEra(city) < target.Era)
+                !M2TechGates.CityAllowsBuilding(city, target))
             {
                 // CityBehBuild.upgradeRandomBuilding follows BuildingAsset.upgrade_to
                 // directly and never consults the custom build-order list. This is
@@ -736,8 +725,7 @@ namespace ModernBoxM2Rewrite
             BuildingSpec spec = ContentRegistry.Buildings.Find(candidate => candidate.Id == pBuildingAsset.id);
             if (spec == null) return true;
             if (ModernBoxSettings.Get("ConstructionOption") &&
-                ModernProgression.IsSupportedCity(pCity) &&
-                ModernProgression.GetEra(pCity) >= spec.Era) return true;
+                M2TechGates.CityAllowsBuilding(pCity, spec)) return true;
 
             // Keep every route, including vanilla AI and other ordinary city
             // construction calls, from bypassing M2's current-culture era gate.
