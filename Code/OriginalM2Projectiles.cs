@@ -193,11 +193,6 @@ namespace ModernBoxM2Rewrite
             RegisterProjectile(P("helirocketprojectile", "jetrocketprojectile", 30f, 0.1f, 0.1f, false, "antiairbomb", 3, "fx_fireball_explosion", false, true, true, "smoketrail"));
             RegisterProjectile(P("MIRVartillery", "MIRVartillery", MirvArtillerySpeed, 0.2f, 0.2f, true, "nonannoyingbomb", 4, "fx_explosion_meteorite", false, true, true, "smoketrail", false, true));
             RegisterProjectile(P("MIRVartilleryStrategic", "MIRVartillery", StrategicMirvArtillerySpeed, 0.2f, 0.2f, false, "nonannoyingbomb", 4, "fx_explosion_meteorite", false, true, true, "smoketrail", false, true));
-            // Original M2 used the meteorite explosion without an explicit scale.
-            // Build 719 renders that inherited effect much larger, obscuring most
-            // of a battle. Reduce only the MissileSystem service's strategic visual;
-            // its projectile damage, terraform option, and radius remain unchanged.
-            AssetManager.projectiles.get("MIRVartilleryStrategic").end_effect_scale = 0.35f;
             RegisterProjectile(P("Stone", "Stone", 4f, 0.075f, 0.2f, true, "", 0, "groundshake", false, false, false));
             RegisterProjectile(P("yugesnowball", "snowball", 4f, 0.25f, 0.5f, true, "", 0, "", true, false, true));
             RegisterProjectile(P("thunderplasma", "thunderplasma", 20f, 0.3f, 0.3f, true, "nonannoyingbomb", 4, "kameboom", false, true, true, "", false, true));
@@ -296,7 +291,8 @@ namespace ModernBoxM2Rewrite
             projectile.terraform_option = spec.Terraform ?? string.Empty;
             projectile.terraform_range = spec.TerraformRange;
             projectile.end_effect = spec.EndEffect ?? string.Empty;
-            projectile.end_effect_scale = 1f;
+            // The old Projectile.targetReached always spawned the end effect at 0.25.
+            projectile.end_effect_scale = 0.25f;
             projectile.sound_launch = spec.SoundLaunch ?? string.Empty;
             projectile.sound_impact = spec.SoundImpact ?? string.Empty;
             projectile.look_at_target = spec.LookAtTarget;

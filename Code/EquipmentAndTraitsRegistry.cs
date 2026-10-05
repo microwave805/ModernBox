@@ -25,19 +25,32 @@ namespace ModernBoxM2Rewrite
             RegisterResource("CyberWareParts", "ui/Icons/SolarPoweredCyberBody", "common_metals", 5000, 16, 8);
             RegisterResource("Xenium", "ui/Icons/Xeno", "common_metals", 2000, 24, 12);
 
-            TerraformOptions nukerTerraform = CreateTerraform("modernbox_nuker_terraform", 10000, 43, true);
-            AssetManager.terraform.add(nukerTerraform);
-            RegisterProjectile("NUKER", "effects/projectiles/NUKER/0", "modernbox_nuker_terraform", 43, "fx_explosion_nuke_atomic", 150f, 0.35f);
+            // Original M2 NUKERExplode: radius 30, 20000 damage, fire, no wasteland.
+            AssetManager.terraform.add(new TerraformOptions
+            {
+                id = "modernbox_nuker_terraform",
+                flash = true,
+                damage_buildings = true,
+                damage = 20000,
+                apply_force = true,
+                applies_to_high_flyers = true,
+                explode_and_set_random_fire = true,
+                explode_tile = true,
+                explosion_pixel_effect = true,
+                explode_strength = 1,
+                transform_to_wasteland = false,
+                shake = true,
+                remove_ruins = false,
+                remove_tornado = false,
+                attack_type = AttackType.Explosion
+            });
+            RegisterProjectile("NUKER", "effects/projectiles/NUKER/0", "modernbox_nuker_terraform", 30, "fx_explosion_nuke_atomic", 150f, 0.3f);
             OriginalM2Projectiles.Register();
 
-            // A silo impact should be a real build-719 atomic bomb, including the
-            // flash delay, mushroom cloud, vanilla radius-30 terrain destruction,
-            // fire, wasteland and 10,000 damage. Merely attaching the final atomic
-            // explosion sprite to a projectile skips the NukeFlash sequence and is
-            // why the former strike looked much weaker than the normal nuke power.
             ProjectileAsset nuker = AssetManager.projectiles.get("NUKER");
             nuker.texture_shadow = "shadows/projectiles/shadow_ball";
-            nuker.impact_actions = TriggerVanillaAtomicNuke;
+            // The old Projectile.targetReached always spawned the end effect at 0.25.
+            nuker.end_effect_scale = 0.25f;
 
             RegisterMirvProjectile("modernbox_mirv_budget", 5, 500);
             RegisterMirvProjectile("modernbox_mirv_decent", 12, 1500);
@@ -159,18 +172,6 @@ namespace ModernBoxM2Rewrite
             if (projectile.frames == null || projectile.frames.Length == 0 || projectile.frames[0] == null)
                 throw new InvalidOperationException("Missing projectile render frame for " + id + " at " + texture + ".");
             AssetManager.projectiles.add(projectile);
-        }
-
-        private static bool TriggerVanillaAtomicNuke(BaseSimObject source, BaseSimObject target, WorldTile tile)
-        {
-            if (tile == null) return false;
-            if (World.world != null) World.world.startShake(0.3f, 0.01f, 2f, true, true);
-            EffectsLibrary.spawn("fx_nuke_flash", tile, "atomic_bomb", null, 0f, -1f, -1f, null);
-
-            // Projectile.targetReached treats false as "impact handled" and skips
-            // its ordinary end effect/terraform pass. The NukeFlash now owns the
-            // complete explosion, avoiding a second smaller blast underneath it.
-            return false;
         }
 
         private static void RegisterMirvProjectile(string id, int radius, int damage)
