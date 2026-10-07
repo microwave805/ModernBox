@@ -156,7 +156,9 @@ namespace ModernBoxM2Rewrite
                 actor.base_stats["armor"] = spec.Armor;
                 actor.base_stats["damage"] = spec.Damage;
                 actor.base_stats["attack_speed"] = spec.AttackSpeed;
-                actor.base_stats["range"] = spec.Range;
+                // A negative range means the original never set one, so the unit keeps
+                // the range of the asset it was cloned from (melee for most creatures).
+                if (spec.Range >= 0f) actor.base_stats["range"] = spec.Range;
                 if (spec.Projectiles > 0f) actor.base_stats["projectiles"] = spec.Projectiles;
                 // Most original M2 boats did not set scale at all; they inherited
                 // it from _boat. Only the six actors below had explicit overrides.

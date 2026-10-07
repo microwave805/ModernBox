@@ -57,8 +57,18 @@ namespace ModernBoxM2Rewrite
 
         private static void RegisterJobs()
         {
-            // follow_same_race, check_hunger_animal and water_feeding no longer exist
-            // as actor tasks in 0.51.2 and are skipped.
+            // follow_same_race is rebuilt from the old engine; check_hunger_animal and
+            // water_feeding no longer exist in 0.51.2 and are skipped.
+            M2FollowSameRace.Register(
+                new[]
+                {
+                    "zombie", "zombie_human", "zombiespeed", "zombiespikes", "zombiepoison", "zombieacid", "zombietentacle",
+                    "zombiestalker", "zombiemother", "zombiefiremaniac", "zombiehulk", "zombieabomination", "zombieclawed",
+                    "zombieballoon", "zombieacidman", "zombiedemon", "zombiedoctor", "zombiedruid", "zombieevilhorseman",
+                    "zombieicelich", "zombiefairy", "zombietarantula"
+                },
+                new[] { "basecrusader", "crusaderdreadnaught", "crusaderHeli", "crusadermaus" },
+                new[] { "Duneworm" });
             AddJob(ZombieWandererJobId, "follow_same_race", "swim_to_island", "random_move", "wait10");
             AddJob(DuneCritterJobId, "random_swim", "crab_danger_check", "follow_same_race", "swim_to_island",
                 "crab_danger_check", "random_move", "check_hunger_animal", "water_feeding", "crab_danger_check", "wait10");
