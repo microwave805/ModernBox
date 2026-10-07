@@ -981,7 +981,8 @@ namespace ModernBoxM2Rewrite
             City city = tile.zone_city;
             if (city == null || city.isRekt() || city.kingdom == null || city.kingdom.wild || !city.kingdom.isCiv())
             {
-                ModernBoxDiagnostics.Warn("Rejected manual " + actorId + " spawn outside a living civilized kingdom city.");
+                // Original M2 action_spawn_jet showed this tip.
+                WorldTip.showNow("You must spawn this vehicle within a kingdom.", false, "top", 3f);
                 return false;
             }
             Actor actor = World.world.units.spawnNewUnit(actorId, tile, true, true, 0f, null, false, true);
