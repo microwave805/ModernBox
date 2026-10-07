@@ -9,6 +9,7 @@ namespace ModernBoxM2Rewrite
     // One culture's researched techs, loaded from and saved to its CultureData.
     internal sealed class M2CultureTechs
     {
+        internal CultureData Data;
         internal readonly List<string> Order = new List<string>();
         internal readonly HashSet<string> Set = new HashSet<string>(StringComparer.Ordinal);
         internal string Researching = string.Empty;
@@ -59,12 +60,20 @@ namespace ModernBoxM2Rewrite
         internal static M2CultureTechs Get(Culture culture)
         {
             if (culture == null || culture.data == null) return null;
-            return States.GetValue(culture, Load);
+            M2CultureTechs state = States.GetValue(culture, Load);
+            // 0.51.2 recycles Culture objects when a world is cleared, so a reused
+            // object must not keep the previous culture's techs.
+            if (state.Data != culture.data)
+            {
+                States.Remove(culture);
+                state = States.GetValue(culture, Load);
+            }
+            return state;
         }
 
         private static M2CultureTechs Load(Culture culture)
         {
-            M2CultureTechs state = new M2CultureTechs();
+            M2CultureTechs state = new M2CultureTechs { Data = culture.data };
             string list;
             culture.data.get(KeyTechs, out list, string.Empty);
             if (!string.IsNullOrEmpty(list))
