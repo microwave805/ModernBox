@@ -92,7 +92,9 @@ namespace ModernBoxM2Rewrite
             AddBomb("Random", "ui/Icons/wat", "Random Bomb", "You could be dropping a proton bomb, or a mini nuke, it's random!");
             AddBomb("Eraser", "ui/Icons/Eraser", "Eraser Bomb", "also known as the overcompensating bomb.");
             // x 684, the alien only shows up sometimes
-            if (UnityEngine.Random.value <= 0.2f) AddGodPower("modernbox_spawn_Xiexel", "ui/Icons/alien", "ALIEN EMOJI", "OH NO YOU GOT AN EASTER EGG!");
+            // WorldBox reseeds UnityEngine.Random from the date at startup, so use a
+            // fresh clock-seeded System.Random like the original did.
+            if (new System.Random().NextDouble() <= 0.2) AddGodPower("modernbox_spawn_Xiexel", "ui/Icons/alien", "ALIEN EMOJI", "OH NO YOU GOT AN EASTER EGG!");
             else AddSpace(1);
             AddClick("BombMenu", "ui/Icons/Bomber", "Bomb Menu", "Tux and Dank got bored and added a lot of extra bombs....", () => M2Windows.Show("EXTRA BOMBS"));
             // x 720 - 1224 were the factory buttons, those are commented out in M2
