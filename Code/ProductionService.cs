@@ -18,6 +18,13 @@ namespace ModernBoxM2Rewrite
         private static readonly Dictionary<long, float> BarracksTimers = new Dictionary<long, float>();
         private static float _gameTick;
         private static readonly Dictionary<int, float> LastConstruction = new Dictionary<int, float>();
+
+        // Building ids and recycled City objects repeat in the next world.
+        internal static void ResetWorldState()
+        {
+            BarracksTimers.Clear();
+            LastConstruction.Clear();
+        }
         private static float _tick;
         private static string _humanDefaultNames;
         private static string _orcDefaultNames;
@@ -47,8 +54,9 @@ namespace ModernBoxM2Rewrite
         {
             int cityKey = city.GetHashCode();
             float last;
-            if (LastConstruction.TryGetValue(cityKey, out last) && Time.time - last < 5f) return;
-            if (TryTierUpgrade(city) || TryEraUpgrade(city)) LastConstruction[cityKey] = Time.time;
+            float now = (float)World.world.getCurWorldTime();
+            if (LastConstruction.TryGetValue(cityKey, out last) && now - last < 5f) return;
+            if (TryTierUpgrade(city) || TryEraUpgrade(city)) LastConstruction[cityKey] = now;
         }
 
         // The original only gated the vanilla house/hall tiers by culture tech (house_tier_N,
@@ -68,6 +76,7 @@ namespace ModernBoxM2Rewrite
                 if (!house && !id.StartsWith("hall_human_", StringComparison.Ordinal)) continue;
                 string next = building.asset.upgrade_to;
                 if (string.IsNullOrEmpty(next) || !next.StartsWith(house ? "house_human_" : "hall_human_", StringComparison.Ordinal)) continue;
+                if (AssetManager.buildings.get(next) == null) continue;
                 int tier;
                 if (!int.TryParse(next.Substring(next.LastIndexOf('_') + 1), out tier)) continue;
                 string tech = house ? (tier >= 5 ? "Renaissance" : "house_tier_" + tier) : (tier >= 2 ? "Renaissance" : "house_tier_3");
@@ -93,25 +102,21 @@ namespace ModernBoxM2Rewrite
             {
                 string sourceId;
                 if (!ActorsAndBuildingsRegistry.UpgradeSources.TryGetValue(upgrade.TargetId, out sourceId)) continue;
-                if (city.countBuildingsOfID(upgrade.TargetId) > 0 && IsSingleStructureChain(upgrade.TargetId)) continue;
                 BuildingAsset target = AssetManager.buildings.get(upgrade.TargetId);
                 if (target == null || !city.hasEnoughResourcesFor(target.cost)) continue;
                 List<Building> sources = city.getBuildingListOfID(sourceId);
                 if (sources == null) continue;
                 foreach (Building source in sources.ToArray())
                 {
-                    if (source == null || !source.isAlive() || source.isUnderConstruction()) continue;
+                    if (source == null || !source.isAlive() || source.isUnderConstruction() || source.asset == null) continue;
+                    // upgradeBuilding dereferences the asset's upgrade_to without a null check.
+                    if (source.asset.upgrade_to != upgrade.TargetId) continue;
                     if (ai.behaviours.CityBehBuild.upgradeBuilding(source, city)) return true;
                 }
             }
             return false;
         }
 
-        private static bool IsSingleStructureChain(string targetId)
-        {
-            BuildingSpec spec = ContentRegistry.Buildings.Find(candidate => candidate.Id == targetId);
-            return spec != null && (spec.Type == "barracks" || spec.Type == "watch_tower" || spec.Type == "mine" || spec.Type == "temple" || spec.Type == "hall" || spec.Type == "dock");
-        }
 
         // Runs on game time (from the world update), so it keeps pace with the game speed.
         internal static void GameUpdate(float elapsed)

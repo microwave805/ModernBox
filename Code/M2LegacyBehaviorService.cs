@@ -230,7 +230,17 @@ namespace ModernBoxM2Rewrite
             if (actor.hasTrait("thorns") || actor.city == null || ModernProgression.GetRace(actor.city) != "orc") return;
             ModernUnitSpec spec = ContentRegistry.FindUnit(actor.asset.id);
             if (spec == null || !spec.Boat) return;
-            if (UnityEngine.Random.value < 0.1f) TransformActor(actor, "orcwarturtle");
+            // HandleOrcBoatTransformations: the boat stays and a war turtle joins it.
+            if (UnityEngine.Random.value < 0.1f)
+            {
+                if (AssetManager.actor_library.get("orcwarturtle") == null || actor.current_tile == null) return;
+                Actor turtle = World.world.units.createNewUnit("orcwarturtle", actor.current_tile);
+                if (turtle == null) return;
+                if (actor.kingdom != null) turtle.setKingdom(actor.kingdom);
+                if (actor.city != null) turtle.setCity(actor.city);
+                ActorsAndBuildingsRegistry.EnsureUnitRuntimeState(turtle);
+                EffectsLibrary.spawn("fx_spawn", turtle.current_tile);
+            }
             else actor.addTrait("thorns", true);
         }
 

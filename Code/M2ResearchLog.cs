@@ -14,6 +14,13 @@ namespace ModernBoxM2Rewrite
         private const float SummaryInterval = 60f;
         private static readonly Dictionary<Culture, float> Started = new Dictionary<Culture, float>();
         private static readonly HashSet<Culture> Stalled = new HashSet<Culture>();
+
+        // Culture objects are recycled into the next world.
+        internal static void ResetWorldState()
+        {
+            Started.Clear();
+            Stalled.Clear();
+        }
         private static string _path;
         private static float _gameTime;
         private static float _summaryTimer = SummaryInterval;

@@ -37,6 +37,12 @@ namespace ModernBoxM2Rewrite
 
         internal static readonly Dictionary<string, UnitData> unitClipboardDict = new Dictionary<string, UnitData>();
         private static readonly HashSet<long> copiedActorIds = new HashSet<long>();
+
+        // Actor ids start again at 1 in every world.
+        internal static void ResetWorldState()
+        {
+            copiedActorIds.Clear();
+        }
         internal static int unitClipboardDictNum;
         private static bool universeDestroyed;
 

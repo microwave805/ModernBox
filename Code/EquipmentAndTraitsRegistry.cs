@@ -26,6 +26,7 @@ namespace ModernBoxM2Rewrite
             RegisterResource("Xenium", "ui/Icons/Xeno", "common_metals", 2000, 24, 12);
 
             // Original M2 NUKERExplode: radius 30, 20000 damage, fire, no wasteland.
+            M2NoBlastStun.Register("modernbox_nuker_terraform");
             AssetManager.terraform.add(new TerraformOptions
             {
                 id = "modernbox_nuker_terraform",
@@ -44,11 +45,13 @@ namespace ModernBoxM2Rewrite
                 remove_tornado = false,
                 attack_type = AttackType.Explosion
             });
-            RegisterProjectile("NUKER", "effects/projectiles/NUKER/0", "modernbox_nuker_terraform", 30, "fx_explosion_nuke_atomic", 150f, 0.3f);
+            RegisterProjectile("NUKER", "effects/projectiles/NUKER/0", "modernbox_nuker_terraform", 30, "fx_explosion_nuke_atomic", 5.5f, 0.3f);
             OriginalM2Projectiles.Register();
 
             ProjectileAsset nuker = AssetManager.projectiles.get("NUKER");
-            nuker.texture_shadow = "shadows/projectiles/shadow_ball";
+            // Resourcez.cs: speed 5.5, parabolic, no shadow, sprite not turned toward the target.
+            nuker.look_at_target = false;
+            OriginalM2Projectiles.LegacyArcProjectileIds.Add("NUKER");
             // The old Projectile.targetReached always spawned the end effect at 0.25.
             nuker.end_effect_scale = 0.25f;
 
@@ -152,7 +155,7 @@ namespace ModernBoxM2Rewrite
                 scale_start = scale,
                 scale_target = scale,
                 trigger_on_collision = true,
-                can_be_collided = true,
+                can_be_collided = false,
                 can_be_blocked = false,
                 can_be_left_on_ground = false,
                 draw_light_area = radius > 0,
@@ -178,6 +181,7 @@ namespace ModernBoxM2Rewrite
         {
             string terraformId = id + "_terraform";
             AssetManager.terraform.add(CreateTerraform(terraformId, damage, radius, true));
+            M2NoBlastStun.Register(terraformId);
             RegisterProjectile(id, "effects/projectiles/NUKER/0", terraformId, radius, radius >= 40 ? "fx_explosion_nuke_atomic" : "fx_explosion_middle", 22f, radius >= 40 ? 0.35f : 0.22f);
         }
 
@@ -225,12 +229,16 @@ namespace ModernBoxM2Rewrite
                 PreloadHeldItemSprites(item);
                 foreach (KeyValuePair<string, float> pair in spec.BaseStats)
                 {
-                    if (AssetManager.base_stats_library.get(pair.Key) == null)
+                    // Old max_age (years) is 0.51.2's lifespan.
+                    string key = pair.Key == "max_age" ? "lifespan" : pair.Key;
+                    if (AssetManager.base_stats_library.get(key) == null)
                     {
                         ModernBoxDiagnostics.Warn("Skipped obsolete M2 equipment stat '" + pair.Key + "'.");
                         continue;
                     }
-                    item.base_stats[pair.Key] = pair.Value;
+                    item.base_stats[key] = pair.Key == "attack_speed" ? M2AttackSpeed.Delta(pair.Value, M2AttackSpeed.OldHumanBase)
+                        : pair.Key == "speed" ? pair.Value * M2OriginalStats.SpeedScale
+                        : pair.Key == "critical_damage_multiplier" ? M2AttackSpeed.CritMultiplier(pair.Value) : pair.Value;
                 }
                 item.equipment_value = spec.Value;
                 item.rigidity_rating = spec.Type == EquipmentType.Weapon ? 4 : 2;
@@ -467,6 +475,15 @@ namespace ModernBoxM2Rewrite
             ActorTrait supportRole = AssetManager.traits.get("SupportRole");
             supportRole.action_special_effect = M2VehicleBehaviours.FriendlyAuraEffect;
             supportRole.special_effect_interval = 5f;
+            // The original left SupportRole givable and removable, with the vanilla healing aura icon.
+            supportRole.can_be_given = true;
+            supportRole.can_be_removed = true;
+            Sprite healingAura = SpriteTextureLoader.getSprite("ui/Icons/actor_traits/iconHealingAura");
+            if (healingAura != null)
+            {
+                supportRole.path_icon = "ui/Icons/actor_traits/iconHealingAura";
+                supportRole.cached_sprite = healingAura;
+            }
 
             // These traits drove M2's non-space simulation systems. Their
             // callbacks are implemented by M2LegacyBehaviorService so the
@@ -475,6 +492,7 @@ namespace ModernBoxM2Rewrite
             ActorTrait unitPotential = AssetManager.traits.get("Unitpotential");
             if (unitPotential != null)
             {
+                unitPotential.type = TraitType.Negative;
                 unitPotential.can_be_given = false;
                 unitPotential.can_be_removed = false;
                 unitPotential.base_stats["offspring"] = -99999f;
@@ -560,7 +578,7 @@ namespace ModernBoxM2Rewrite
             }
             else
             {
-                trait.base_stats["lifespan"] = -10f; trait.base_stats["attack_speed"] = 15f;
+                trait.base_stats["lifespan"] = -10f; trait.base_stats["attack_speed"] = M2AttackSpeed.Delta(15f, M2AttackSpeed.OldHumanBase);
                 trait.base_stats["intelligence"] = -5f; trait.base_stats["warfare"] = 20f;
                 trait.base_stats["diplomacy"] = -500f; trait.base_stats["stewardship"] = -400f;
                 trait.base_stats["opinion"] = -800f; trait.base_stats["loyalty_traits"] = -10000f; trait.base_stats["cities"] = -100f;
@@ -630,8 +648,8 @@ namespace ModernBoxM2Rewrite
             RegisterLegacyBehaviorTrait(id, icon, "An environmental mutation of the M2 zombie infection.");
             ActorTrait trait = AssetManager.traits.get(id);
             if (trait == null) return;
-            trait.base_stats["speed"] = speed;
-            trait.base_stats["attack_speed"] = attackSpeed;
+            trait.base_stats["speed"] = speed * M2OriginalStats.SpeedScale;
+            trait.base_stats["attack_speed"] = M2AttackSpeed.Delta(attackSpeed, M2AttackSpeed.OldZombieBase);
             trait.base_stats["accuracy"] = accuracy;
             // Legacy mod_health no longer exists. A small flat bonus preserves
             // ChaosZombie's toughness without writing an invalid stat ID.

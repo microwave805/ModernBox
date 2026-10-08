@@ -37,6 +37,16 @@ namespace ModernBoxM2Rewrite
         // biome's vegetation; units, minerals and grow strength are M2's.
         private static void RegisterPlanetBiomes()
         {
+            // Creatures.cs reloaded the vanilla cybertile art from M2's own tiles folder.
+            // Do it before the planet copies are cloned so they share the M2 art.
+            foreach (string id in new[] { "cybertile_low", "cybertile_high" })
+            {
+                TopTileType cyber = AssetManager.top_tiles.get(id);
+                if (cyber == null) continue;
+                // The vanilla art is already cached under this path.
+                SpriteTextureLoader._cached_sprite_list.Remove("tiles/" + id);
+                AssetManager.top_tiles.loadSpritesForTile(cyber);
+            }
             PlanetBiome("biome_IcePlanet", "IcePlanet", "biome_permafrost", "permafrost_low", "permafrost_high", 0, FrogSheep, null, null);
             PlanetBiome("biome_IcePlanet1", "IcePlanet1", "biome_permafrost", "frozen_low", "frozen_high", 0, FrogSheep, null, null);
             PlanetBiome("biome_RobotPlanet", "RobotPlanet", "biome_cybertile", "cybertile_low", "cybertile_high", 0, FrogSheep, null, null);

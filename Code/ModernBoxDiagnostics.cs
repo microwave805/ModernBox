@@ -211,18 +211,13 @@ namespace ModernBoxM2Rewrite
             EquipmentAsset missileAttack = AssetManager.items.get("missilelauncherlong");
             ProjectileAsset missileProjectile = AssetManager.projectiles.get("MIRVartillery");
             ActorAsset missileSystem = AssetManager.actor_library.get("MissileSystem");
-            ProjectileAsset strategicMissileProjectile = AssetManager.projectiles.get(MissileSystemService.StrategicProjectileId);
-            DecisionAsset missileDecision = AssetManager.decisions_library.get(MissileSystemService.DecisionId);
             if (missileAttack == null || missileAttack.projectile != "MIRVartillery" ||
                 Math.Abs(missileAttack.base_stats["projectiles"] - 1f) > 0.001f ||
-                Math.Abs(missileAttack.base_stats["attack_speed"] - 0.1f) > 0.001f ||
-                missileProjectile == null || !missileProjectile.use_min_angle_height ||
+                Math.Abs(missileAttack.base_stats["attack_speed"]) > 0.001f ||
+                missileProjectile == null || !OriginalM2Projectiles.UsesLegacyArc("MIRVartillery") ||
                 Math.Abs(missileProjectile.speed - OriginalM2Projectiles.MirvArtillerySpeed) > 0.001f ||
                 missileSystem == null || missileSystem.default_attack != "missilelauncherlong" ||
-                Math.Abs(missileSystem.base_stats["attack_speed"]) > 0.001f ||
-                strategicMissileProjectile == null || strategicMissileProjectile.use_min_angle_height ||
-                Math.Abs(strategicMissileProjectile.speed - OriginalM2Projectiles.StrategicMirvArtillerySpeed) > 0.001f ||
-                missileDecision == null || missileDecision.cooldown != MissileSystemService.LaunchCooldownSeconds)
+                Math.Abs(missileSystem.base_stats["attack_speed"] - M2AttackSpeed.ForUnit(0f, "missilelauncherlong")) > 0.001f)
                 errors.Add("missile-system-mirv");
             BuildingAsset silo = AssetManager.buildings.get("MissileSilo");
             if (silo == null || !silo.tower || silo.tower_projectile != "NUKER" || Math.Abs(silo.tower_projectile_reload - 32f) > 0.001f)

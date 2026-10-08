@@ -263,7 +263,7 @@ namespace ModernBoxM2Rewrite
             if (frozen != null)
             {
                 frozen.base_stats = new BaseStats();
-                frozen.base_stats["speed"] = -10f;
+                frozen.base_stats["speed"] = -10f * M2OriginalStats.SpeedScale;
                 frozen.action_special_effect = ConstantFrozenEffect;
             }
 
@@ -271,7 +271,7 @@ namespace ModernBoxM2Rewrite
             if (unpowered != null)
             {
                 unpowered.base_stats = new BaseStats();
-                unpowered.base_stats["speed"] = -100f;
+                unpowered.base_stats["speed"] = -100f * M2OriginalStats.SpeedScale;
                 unpowered.base_stats["range"] = -20f;
                 unpowered.base_stats["accuracy"] = -100f;
                 unpowered.action_special_effect = RandomWaitEffect;
@@ -288,8 +288,8 @@ namespace ModernBoxM2Rewrite
             if (night != null)
             {
                 night.base_stats = new BaseStats();
-                night.base_stats["speed"] = 40f;
-                night.base_stats["attack_speed"] = 50f;
+                night.base_stats["speed"] = 40f * M2OriginalStats.SpeedScale;
+                night.base_stats["attack_speed"] = M2AttackSpeed.Delta(50f, M2AttackSpeed.OldZombieBase);
                 ZombieEraTrait(night);
             }
 
@@ -297,10 +297,10 @@ namespace ModernBoxM2Rewrite
             if (chaos != null)
             {
                 chaos.base_stats = new BaseStats();
-                chaos.base_stats["speed"] = 20f;
+                chaos.base_stats["speed"] = 20f * M2OriginalStats.SpeedScale;
                 chaos.base_stats["scale"] = 0.05f;
                 chaos.base_stats["multiplier_health"] = 0.3f;
-                chaos.base_stats["attack_speed"] = 30f;
+                chaos.base_stats["attack_speed"] = M2AttackSpeed.Delta(30f, M2AttackSpeed.OldZombieBase);
                 chaos.action_attack_target = ActionLibrary.restoreHealthOnHit;
                 ZombieEraTrait(chaos);
             }
@@ -309,8 +309,8 @@ namespace ModernBoxM2Rewrite
             if (frosted != null)
             {
                 frosted.base_stats = new BaseStats();
-                frosted.base_stats["speed"] = -30f;
-                frosted.base_stats["attack_speed"] = -50f;
+                frosted.base_stats["speed"] = -30f * M2OriginalStats.SpeedScale;
+                frosted.base_stats["attack_speed"] = M2AttackSpeed.Delta(-50f, M2AttackSpeed.OldZombieBase);
                 frosted.action_special_effect = ConstantFrozenEffect;
                 ZombieEraTrait(frosted);
             }
@@ -319,7 +319,7 @@ namespace ModernBoxM2Rewrite
             if (scorched != null)
             {
                 scorched.base_stats = new BaseStats();
-                scorched.base_stats["speed"] = -100f;
+                scorched.base_stats["speed"] = -100f * M2OriginalStats.SpeedScale;
                 scorched.base_stats["range"] = -20f;
                 scorched.base_stats["accuracy"] = -100f;
                 scorched.action_special_effect = RandomWaitEffect;

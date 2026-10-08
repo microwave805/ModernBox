@@ -419,21 +419,6 @@ namespace ModernBoxM2Rewrite
         }
     }
 
-    [HarmonyPatch(typeof(Actor), "startAttackCooldown")]
-    internal static class MissileSystemMinimumCooldownPatch
-    {
-        [HarmonyPostfix]
-        private static void Postfix(Actor __instance)
-        {
-            // The strategic decision has its own cooldown, but this also covers
-            // possession and legacy actors that enter an ordinary attack task.
-            // Additive era/trait stats therefore cannot turn the launcher into an
-            // automatic weapon.
-            if (__instance != null && __instance.asset != null && __instance.asset.id == "MissileSystem")
-                __instance.attack_timer = Mathf.Max(__instance.attack_timer, MissileSystemService.LaunchCooldownSeconds);
-        }
-    }
-
     /// <summary>
     /// Build 719 applies gravity to every ProjectileAsset. Its
     /// use_min_angle_height field only chooses the lower or higher ballistic
@@ -473,6 +458,37 @@ namespace ModernBoxM2Rewrite
             if (projectile.isMainTargetStillValid())
                 targetHeight = Mathf.Max(0f, projectile._main_target.getHeight());
 
+            if (OriginalM2Projectiles.UsesLegacyArc(projectile.asset.id))
+            {
+                // Old Projectile.update: lerp start->target over (distance + targetZ) / speed
+                // seconds, lifted by Toolbox.Parabola with a height of 4 x that time.
+                Vector2 start = projectile._vector_start;
+                Vector2 end = projectile._vector_target;
+                float total = Vector2.Distance(start, end);
+                float flightTime = (total + targetHeight) / Mathf.Max(0.01f, projectile._speed);
+                if (targetHeight > 0f && flightTime < 0.7f) flightTime = 0.7f;
+                Vector2 ground = new Vector2(projectile._current_position_3d.x, projectile._current_position_3d.y);
+                float step = total / Mathf.Max(0.0001f, flightTime) * Mathf.Max(0f, elapsed);
+                bool arrived = Vector2.Distance(ground, end) <= Mathf.Max(0.05f, step);
+                Vector2 nextGround = arrived ? end : Vector2.MoveTowards(ground, end, step);
+                float progress = total <= 0.0001f ? 1f : Mathf.Clamp01(1f - Vector2.Distance(nextGround, end) / total);
+                float arcHeight = flightTime * 4f;
+                float z = -4f * arcHeight * progress * progress + 4f * arcHeight * progress + targetHeight * progress;
+                Vector3 next = new Vector3(nextGround.x, nextGround.y, z);
+                Vector3 moved = next - projectile._current_position_3d;
+                projectile._velocity = elapsed > 0f ? moved / elapsed : Vector3.zero;
+                projectile._current_position_3d = next;
+                if (projectile.asset.look_at_target && moved.sqrMagnitude > 0.000001f)
+                {
+                    float arcAngle = Mathf.Atan2(moved.y + moved.z, moved.x) * Mathf.Rad2Deg;
+                    projectile.rotation = Quaternion.AngleAxis(arcAngle, Vector3.forward);
+                }
+                // The old engine only hit at the end of an arc.
+                if (!arrived) return;
+                ResolveHit(projectile, TryHitDesignatedTargetAtEndpoint(projectile, projectile.checkHitOnNearbyUnits()), true);
+                return;
+            }
+
             Vector3 target = new Vector3(projectile._vector_target.x, projectile._vector_target.y, targetHeight);
             Vector3 delta = target - projectile._current_position_3d;
             float distance = delta.magnitude;
@@ -498,6 +514,11 @@ namespace ModernBoxM2Rewrite
             AttackDataResult result = projectile.checkHitOnNearbyUnits();
             if (reached)
                 result = TryHitDesignatedTargetAtEndpoint(projectile, result);
+            ResolveHit(projectile, result, reached);
+        }
+
+        private static void ResolveHit(Projectile projectile, AttackDataResult result, bool reached)
+        {
             switch (result.state)
             {
                 case ApplyAttackState.Hit:
@@ -646,8 +667,6 @@ namespace ModernBoxM2Rewrite
     [HarmonyPatch(typeof(ai.behaviours.CityBehBuild), nameof(ai.behaviours.CityBehBuild.calcPossibleBuildings))]
     internal static class ModernConstructionWeightPatch
     {
-        private const int ModernOrderWeight = 3;
-
         [HarmonyPrefix]
         private static void Prefix(City pCity)
         {
@@ -676,16 +695,7 @@ namespace ModernBoxM2Rewrite
                 }
                 if (!ModernBoxSettings.Get("ConstructionOption") || spec == null || !M2TechGates.CityAllowsBuilding(pCity, spec)) possible.RemoveAt(index);
             }
-            int originalCount = possible.Count;
-            for (int index = 0; index < originalCount; index++)
-            {
-                BuildOrder order = possible[index];
-                if (order == null || string.IsNullOrEmpty(order.id) || !order.id.StartsWith("order_m2_", System.StringComparison.Ordinal)) continue;
-                // Build 719 chooses uniformly from this list and exposes no order
-                // priority. Repeating an already eligible native order supplies an
-                // explicit weight without bypassing resource, tier, limit, or tile checks.
-                for (int copy = 1; copy < ModernOrderWeight; copy++) possible.Add(order);
-            }
+            // Like the old engine, every eligible order (M2 or native) has the same chance.
         }
     }
 

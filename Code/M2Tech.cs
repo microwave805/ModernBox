@@ -359,6 +359,9 @@ namespace ModernBoxM2Rewrite
             if (__instance == null || __instance.isPaused()) return;
             M2Tech.Update(pElapsed);
             ProductionService.GameUpdate(pElapsed);
+            // World time, so these follow game speed and stop while paused.
+            ProductionService.Update(pElapsed);
+            BombService.Update();
             M2LegacyBehaviorService.Update(pElapsed);
         }
     }

@@ -31,7 +31,7 @@ namespace ModernBoxM2Rewrite
 
             if (spec.Pattern == BombPattern.ClusterNuke || spec.Pattern == BombPattern.ClusterLightning)
             {
-                Patterns.Add(new PatternJob { Map = World.world, Center = tile, Spec = spec, NextEmission = Time.time, Remaining = 25 });
+                Patterns.Add(new PatternJob { Map = World.world, Center = tile, Spec = spec, NextEmission = Now, Remaining = 25 });
                 return;
             }
             if (spec.Pattern == BombPattern.Spreader)
@@ -41,7 +41,7 @@ namespace ModernBoxM2Rewrite
                     Map = World.world,
                     Center = tile,
                     Spec = spec,
-                    NextEmission = Time.time,
+                    NextEmission = Now,
                     Remaining = 4,
                     Frontier = new List<WorldTile> { tile }
                 });
@@ -76,7 +76,10 @@ namespace ModernBoxM2Rewrite
             }
 
             EffectsLibrary.spawnAtTileRandomScale(spec.EffectId, tile, scaleMin, scaleMax);
-            MapAction.damageWorld(tile, EnsureCircleBrush(radius), options, null);
+            // The original bombs used the old engine's blasts, which never stunned.
+            M2NoBlastStun.Begin();
+            try { MapAction.damageWorld(tile, EnsureCircleBrush(radius), options, null); }
+            finally { M2NoBlastStun.End(); }
             World.world.startShake(spec.Pattern == BombPattern.Spreader ? 0.4f : 0.3f, 0.01f, 2f, true, true);
         }
 
@@ -114,6 +117,9 @@ namespace ModernBoxM2Rewrite
             return radius;
         }
 
+        // World time: the original coroutines waited in scaled time, so bursts follow game speed.
+        private static float Now => World.world == null ? 0f : (float)World.world.getCurWorldTime();
+
         internal static void Update()
         {
             if (Patterns.Count == 0 || World.world == null) return;
@@ -125,7 +131,7 @@ namespace ModernBoxM2Rewrite
                     Patterns.RemoveAt(index);
                     continue;
                 }
-                if (Time.time < pattern.NextEmission) continue;
+                if (Now < pattern.NextEmission) continue;
                 if (pattern.Spec.Pattern == BombPattern.Spreader)
                 {
                     List<WorldTile> next = new List<WorldTile>();
@@ -143,13 +149,13 @@ namespace ModernBoxM2Rewrite
                     }
                     pattern.Frontier = next;
                     pattern.Wave++;
-                    pattern.NextEmission = Time.time + 1f;
+                    pattern.NextEmission = Now + 1f;
                 }
                 else
                 {
                     WorldTile tile = RandomTile(pattern.Center, 35);
                     if (tile != null) Detonate(tile, pattern.Spec);
-                    pattern.NextEmission = Time.time + 0.2f;
+                    pattern.NextEmission = Now + 0.2f;
                 }
                 pattern.Remaining--;
                 if (pattern.Remaining <= 0) Patterns.RemoveAt(index);

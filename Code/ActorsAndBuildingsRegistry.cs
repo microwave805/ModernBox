@@ -38,7 +38,6 @@ namespace ModernBoxM2Rewrite
         {
             RegisterFallbackKingdom();
             RegisterInvasionKingdoms();
-            MissileSystemService.RegisterDecision();
             foreach (ModernUnitSpec spec in ContentRegistry.Units)
             {
                 string baseId = spec.Boat ? CurrentBoatBase(spec.Id) : spec.BaseAsset;
@@ -150,12 +149,14 @@ namespace ModernBoxM2Rewrite
                     actor.disable_jump_animation = true;
                     actor.animation_speed_based_on_walk_speed = false;
                 }
+                // Frame lists the original set explicitly win over the guesses above.
+                M2OriginalAnimations.Apply(actor, spec.Id, string.IsNullOrEmpty(spec.TextureFolder) ? spec.Id : spec.TextureFolder);
                 actor.default_attack = CurrentAttackId(spec.Attack);
                 actor.base_stats["health"] = spec.Health;
-                actor.base_stats["speed"] = spec.Speed;
+                actor.base_stats["speed"] = spec.Speed * M2OriginalStats.SpeedScale;
                 actor.base_stats["armor"] = spec.Armor;
                 actor.base_stats["damage"] = spec.Damage;
-                actor.base_stats["attack_speed"] = spec.AttackSpeed;
+                actor.base_stats["attack_speed"] = M2AttackSpeed.ForUnit(spec.AttackSpeed, spec.Attack);
                 // A negative range means the original never set one, so the unit keeps
                 // the range of the asset it was cloned from (melee for most creatures).
                 if (spec.Range >= 0f) actor.base_stats["range"] = spec.Range;
@@ -280,9 +281,7 @@ namespace ModernBoxM2Rewrite
                 // job_baby is also populated even though M2 units have no baby form,
                 // because legacy saves can contain age-zero actor data.
                 string[] runtimeJobs;
-                if (spec.Id == "MissileSystem")
-                    runtimeJobs = new[] { "decision" };
-                else if (spec.Boat && actor.job != null && actor.job.Length > 0)
+                if (spec.Boat && actor.job != null && actor.job.Length > 0)
                     runtimeJobs = actor.job;
                 else
                     runtimeJobs = new[] { "attacker" };
@@ -291,7 +290,6 @@ namespace ModernBoxM2Rewrite
                 actor.job_citizen = runtimeJobs;
                 actor.job_kingdom = runtimeJobs;
                 actor.job_attacker = runtimeJobs;
-                if (spec.Id == "MissileSystem") MissileSystemService.ConfigureActor(actor);
                 // ActorAsset.getIconPath always prepends "ui/Icons/" in build 719.
                 // Generated M2 unit icons are usually actor-frame paths, so storing
                 // that full path in ActorAsset.icon creates the impossible path
@@ -322,6 +320,7 @@ namespace ModernBoxM2Rewrite
                 actor.action_on_load += EnsureUnitRuntimeState;
                 foreach (string trait in M2VehicleBehaviours.ConfigureOriginalActor(actor, spec))
                     actor.addTrait(trait);
+                M2OriginalStats.Apply(actor, spec.Id);
                 ModernLocalization.Add(spec.Id, FriendlyName(spec.Id));
                 RegisterSpawnPower(spec);
             }
@@ -1023,7 +1022,7 @@ namespace ModernBoxM2Rewrite
                 if (!spec.UpgradeOnly)
                     building.fundament = spec.Tower ? new BuildingFundament(4, 2, 2, 0) : new BuildingFundament(2, 2, 2, 0);
                 building.cost = spec.Cost;
-                building.priority = spec.UpgradeOnly ? 2500 : (spec.Tower ? 3750 : 69999);
+                building.priority = spec.UpgradeOnly ? OriginalEraPriority(spec.SourceId) : (spec.Tower ? 3750 : 69999);
                 building.base_stats["health"] = spec.Health;
                 building.base_stats["size"] = 1f;
                 // In build 719 both single and batch placement add zone-wide exclusion
@@ -1039,7 +1038,8 @@ namespace ModernBoxM2Rewrite
                 building.can_be_upgraded = false;
                 building.can_be_abandoned = true;
                 building.can_be_demolished = true;
-                building.burnable = !spec.Tower;
+                // Era stages keep the burnable flag of the native building they clone, like the original.
+                if (!spec.UpgradeOnly) building.burnable = !spec.Tower;
                 building.has_ruin_state = true;
                 building.has_ruins_graphics = true;
                 building.has_sprites_ruin = true;
@@ -1089,8 +1089,8 @@ namespace ModernBoxM2Rewrite
             RegisterLegacySpawnerBuilding("pileofcorpses", "$building_civ_human$", "zombie", NativeUndeadKingdomId, 1000f);
 
             // M2 has two different ice structures. The common newicetower is a
-            // walker production spawner; the rare icewatchtower is an armed
-            // defensive tower and does not produce units. Their old registration
+            // walker production spawner; the rare icewatchtower is a plain
+            // structure and does not produce units. Their old registration
             // cloned different legacy templates, so spell the distinction out for
             // build 719 instead of inheriting city-building behavior.
             BuildingAsset watchtower = AssetManager.buildings.get("icewatchtower");
@@ -1101,7 +1101,8 @@ namespace ModernBoxM2Rewrite
                 watchtower.housing_slots = 0;
                 watchtower.can_units_live_here = false;
                 watchtower.ice_tower = true;
-                watchtower.tower = true;
+                // Creatures.cs set tower_projectile but never tower, so the original never fired.
+                watchtower.tower = false;
                 watchtower.tower_projectile = "frostbolt";
                 watchtower.tower_projectile_amount = 1;
                 watchtower.tower_projectile_offset = 10f;
@@ -1303,6 +1304,39 @@ namespace ModernBoxM2Rewrite
             SetCost("house_human_5", new ConstructionCost(1, 1, 0, 1));
             SetCost("hall_human_1", new ConstructionCost(1, 1, 0, 1));
             SetCost("hall_human_2", new ConstructionCost(1, 1, 0, 1));
+            // The rest of UpgradesUwU's changes to the native first stages.
+            SetCost("barracks_human", new ConstructionCost(0, 0, 0, 1));
+            SetCost("temple_human", new ConstructionCost(0, 0, 0, 1));
+            SetCost("statue", new ConstructionCost(0, 1, 0, 1));
+            SetCost("mine", new ConstructionCost(0, 0, 0, 1));
+            SetPriority("statue", 8888888);
+            SetPriority("barracks_human", 8888888);
+            SetPriority("temple_human", 8888888);
+            SetPriority("mine", 1000);
+            SetPriority("watch_tower_human", 200);
+            SetPriority("docks_human", 200);
+            for (int tier = 1; tier <= 5; tier++) SetPriority("house_human_" + tier, tier * 10 + 10);
+            SetPriority("hall_human_1", 200);
+            SetPriority("hall_human_2", 300);
+        }
+
+        private static void SetPriority(string id, int priority)
+        {
+            BuildingAsset asset = AssetManager.buildings.get(id);
+            if (asset != null) asset.priority = priority;
+        }
+
+        // UpgradesUwU.cs priorities of each era stage, by its human art id.
+        private static int OriginalEraPriority(string artId)
+        {
+            string id = artId ?? string.Empty;
+            int era = id.Contains("_rain_") ? 0 : id.Contains("_industrial_") ? 1 : id.Contains("_modern_") ? 2 : id.Contains("_future_") ? 3 : -1;
+            if (era < 0) return 2500;
+            if (id.StartsWith("temple_", StringComparison.Ordinal)) return 8888888;
+            if (id.StartsWith("mine_", StringComparison.Ordinal)) return 3000 + era * 1000;
+            if (id.StartsWith("dock_", StringComparison.Ordinal)) return 30000 + era * 10000;
+            if (id.StartsWith("house_", StringComparison.Ordinal)) return 70 + (era - 1) * 10;
+            return 300 + era * 100;
         }
 
         private static void SetCost(string id, ConstructionCost cost)
@@ -1348,6 +1382,7 @@ namespace ModernBoxM2Rewrite
                 if (species == null || species.architecture_asset == null) continue;
                 CityBuildOrderAsset orders = CreatePrivateBuildOrders(species, race);
                 if (orders == null) continue;
+                AddOriginalEarlyOrders(species, orders);
                 foreach (BuildingSpec spec in ContentRegistry.Buildings)
                 {
                     if (spec.UpgradeOnly) continue;
@@ -1370,6 +1405,26 @@ namespace ModernBoxM2Rewrite
                 orders.prepareForAssetGeneration();
             }
             ModernBoxDiagnostics.Info("Added M2 construction and upgrade orders to human, orc, elf, and dwarf architectures.");
+        }
+
+        // UpgradesUwU.cs appended these to kingdom_base: one each from 30 people and
+        // 10 buildings once the city has a bonfire, earlier than the native orders.
+        private static readonly string[] OriginalEarlyOrders =
+        {
+            "order_barracks", "order_temple", "order_watch_tower", "order_mine", "order_docks_0",
+            "order_docks_1", "order_statue", "order_windmill_0", "order_windmill_1"
+        };
+
+        private static void AddOriginalEarlyOrders(ActorAsset species, CityBuildOrderAsset orders)
+        {
+            Dictionary<string, string> keys = species.architecture_asset.building_ids_for_construction;
+            foreach (string id in OriginalEarlyOrders)
+            {
+                if (keys == null || !keys.ContainsKey(id)) continue;
+                if (orders.list.Any(order => order.id == id && order.required_pop == 30 && order.required_buildings == 10)) continue;
+                BuildOrder order = orders.addBuilding(id, 1, 30, 10);
+                order.requirements_orders = new[] { "order_bonfire" };
+            }
         }
 
         private static CityBuildOrderAsset CreatePrivateBuildOrders(ActorAsset species, string race)
@@ -1474,7 +1529,7 @@ namespace ModernBoxM2Rewrite
             switch (era)
             {
                 case M2Era.Renaissance: tower.tower_projectile = "cannonballprojectile"; damage = 20f; knockback = 2f; range = 20f; attackSpeed = 10f; amount = 4; break;
-                case M2Era.Industrial: tower.tower_projectile = "shotgun_bullet"; damage = 10f; knockback = 0f; range = 30f; attackSpeed = 10000f; break;
+                case M2Era.Industrial: tower.tower_projectile = OriginalM2Projectiles.LegacyBulletId; damage = 10f; knockback = 0f; range = 30f; attackSpeed = 10000f; break;
                 case M2Era.Modern: tower.tower_projectile = "artilleryshell"; damage = 200f; knockback = 6f; range = 100f; attackSpeed = 1f; break;
                 default: tower.tower_projectile = "big_plasma_bomb"; damage = 1000f; knockback = 3f; range = 50f; attackSpeed = 100f; break;
             }

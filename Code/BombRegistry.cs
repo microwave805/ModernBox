@@ -23,12 +23,10 @@ namespace ModernBoxM2Rewrite
                     default_scale = 0.2f,
                     random_frame = spec.Id == "MOAB",
                     random_flip = false,
-                    sound_launch = "event:/SFX/DROPS/DropLaunchGrenadeHuge",
                     falling_speed = 3.2f,
                     falling_speed_random = 0.5f,
                     falling_height = new Vector2(60f, 70f),
                     falling_random_x_move = false,
-                    surprises_units = true,
                     action_landed = OnBombLanded
                 };
                 AssetManager.drops.add(drop);
@@ -59,14 +57,15 @@ namespace ModernBoxM2Rewrite
 
         private static void RegisterCustomEffects()
         {
-            RegisterEffect("fx_color_grenade", "effects/Colornade");
-            RegisterEffect("fx_blood_lightning", "effects/BloodLightning");
-            RegisterEffect("fx_explosion_blue", "effects/NoNuke");
-            RegisterEffect("fx_explosion_dank", "effects/DankEffect");
-            RegisterEffect("fx_dankymatter_effect", "effects/kameboomtesttest");
+            const string strike = "event:/SFX/EXPLOSIONS/ExplosionLightningStrike";
+            RegisterEffect("fx_color_grenade", "effects/Colornade", strike);
+            RegisterEffect("fx_blood_lightning", "effects/BloodLightning", strike);
+            RegisterEffect("fx_explosion_blue", "effects/NoNuke", strike);
+            RegisterEffect("fx_explosion_dank", "effects/DankEffect", strike);
+            RegisterEffect("fx_dankymatter_effect", "effects/kameboomtesttest", null);
         }
 
-        private static void RegisterEffect(string id, string path)
+        private static void RegisterEffect(string id, string path, string sound)
         {
             if (AssetManager.effects_library.get(id) != null) return;
             EffectAsset effect = new EffectAsset
@@ -79,7 +78,8 @@ namespace ModernBoxM2Rewrite
                 draw_light_area = true,
                 draw_light_size = 2f,
                 draw_light_area_offset_y = 5f,
-                limit = 100
+                limit = 100,
+                sound_launch = sound
             };
             AssetManager.effects_library.add(effect);
         }

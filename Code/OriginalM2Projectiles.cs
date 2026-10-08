@@ -11,12 +11,9 @@ namespace ModernBoxM2Rewrite
     /// </summary>
     internal static class OriginalM2Projectiles
     {
-        // M2 used speed 3 with the pre-2025 parabolic projectile implementation.
-        // Build 719 applies 9.8 gravity to projectile velocity, so speed 3 can
-        // travel only about one tile before landing. Fifty is the direct
-        // ballistic equivalent for MissileSystem's original 150-tile range and
-        // leaves margin for target-height differences without becoming hitscan.
-        internal const float MirvArtillerySpeed = 50f;
+        // MIRV.cs: speed 3, parabolic. Flown by the legacy arc (see LegacyArcProjectileIds),
+        // so it reaches the Missile System's full 150-tile range like the original.
+        internal const float MirvArtillerySpeed = 3f;
         // M5's strategic MissileSystem projectile is a straight, speed-100 shot.
         // Keep that translation separate from M2's parabolic MIRV equipment round
         // so the strategic decision can cross a full map without falling short.
@@ -51,8 +48,8 @@ namespace ModernBoxM2Rewrite
             { "incendiarybombing", "torch" },
             { "icebolt", "frostbolt" },
             { "snowthrow", "bigsnowball" },
-            { "singleshot", "shotgun_bullet" },
-            { "machinegunery", "shotgun_bullet" },
+            { "singleshot", LegacyBulletId },
+            { "machinegunery", LegacyBulletId },
             { "artillerystriker", "artilleryshell" },
             { "missilelauncherlong", "MIRVartillery" },
             { "missilelaunchershort", "RPGload" },
@@ -68,7 +65,7 @@ namespace ModernBoxM2Rewrite
             { "destroyerbot", "seismicrod" },
             { "JetRocket", "jetrocketprojectile" },
             { "heliRocket", "helirocketprojectile" },
-            { "GunshipCannon", "shotgun_bullet" },
+            { "GunshipCannon", LegacyBulletId },
             { "bigplasmabomb", "big_plasma_bomb" },
             { "thunderartillery", "thunderplasma" },
             { "hyperartillery", "hyperkame" },
@@ -114,9 +111,20 @@ namespace ModernBoxM2Rewrite
             "big_plasma_bomb"
         };
 
+        // Original parabolic=true projectiles. 0.51.2 fires these ballistically, which caps a
+        // slow shot's range at speed^2/9.8 (a catapult stone landed ~2 tiles out), so they are
+        // flown like the old engine instead: steady ground speed and a parabola 4 x flight time high.
+        internal static readonly HashSet<string> LegacyArcProjectileIds = new HashSet<string>(StringComparer.Ordinal);
+
         internal static bool UsesLegacyDirectTrajectory(string projectileId)
         {
-            return !string.IsNullOrEmpty(projectileId) && LegacyDirectProjectileIds.Contains(projectileId);
+            return !string.IsNullOrEmpty(projectileId) &&
+                   (LegacyDirectProjectileIds.Contains(projectileId) || LegacyArcProjectileIds.Contains(projectileId));
+        }
+
+        internal static bool UsesLegacyArc(string projectileId)
+        {
+            return !string.IsNullOrEmpty(projectileId) && LegacyArcProjectileIds.Contains(projectileId);
         }
 
         internal static string GetEquipmentProjectile(string id)
@@ -141,12 +149,26 @@ namespace ModernBoxM2Rewrite
                 case "greenblaster":
                 case "greenminigun":
                 case "greenplasmagun": return "greenplasma";
-                default: return "shotgun_bullet";
+                default: return LegacyBulletId;
             }
         }
 
+        // The old engine's shotgun_bullet: speed 20+-7, straight, never blocked. 0.51.2's is
+        // speed 30, ballistic and blockable, so M2 guns get their own copy of the old one.
+        internal const string LegacyBulletId = "modernbox_m2_bullet";
+
         internal static void Register()
         {
+            if (AssetManager.projectiles.get(LegacyBulletId) == null && AssetManager.projectiles.get("shotgun_bullet") != null)
+            {
+                ProjectileAsset bullet = AssetManager.projectiles.clone(LegacyBulletId, "shotgun_bullet");
+                bullet.speed = 20f;
+                bullet.speed_random = 7f;
+                bullet.can_be_blocked = false;
+                bullet.can_be_collided = false;
+            }
+            LegacyDirectProjectileIds.Add(LegacyBulletId);
+
             RegisterTerraform("nonannoyingbomb", true, false, 2, false, true);
             RegisterTerraform("nonannoyingbullet", true, false, 0, false, false);
             RegisterTerraform("antiairbomb", true, false, 2, true, false);
@@ -156,7 +178,8 @@ namespace ModernBoxM2Rewrite
 
             RegisterEffect("groundshake", "effects/groundshake", string.Empty, 2f, 5f, 100);
             RegisterEffect("Shermanboom", "effects/Shermanboom", string.Empty, 1f, 0f, 80);
-            RegisterEffect("frosttrail", "effects/frosttrail", string.Empty, 1f, 0f, 80);
+            // guns.cs left frosttrail at the EffectAsset default light size of 0.5.
+            RegisterEffect("frosttrail", "effects/frosttrail", string.Empty, 0.5f, 0f, 80);
             RegisterEffect("frostspell", "effects/frostspell", string.Empty, 0.2f, 0f, 80);
             RegisterEffect("icespikes", "effects/fx_basic/icespikes", string.Empty, 1f, 0f, 80);
             RegisterEffect("blueplasmaboom", "effects/blueplasmaboom", "event:/SFX/EXPLOSIONS/ExplosionSmall", 1f, 0f, 80);
@@ -168,6 +191,7 @@ namespace ModernBoxM2Rewrite
             RegisterEffect("redbigboom", "effects/redbigboom", "event:/SFX/EXPLOSIONS/ExplosionSmall", 1f, 0f, 80);
 
             RegisterProjectile(P("frostbolt", "frostbolt", 15f, 0.075f, 0.2f, true, "", 2, "icespikes", false, true, true, "frosttrail", true));
+            AssetManager.projectiles.get("frostbolt").draw_light_size = 0.1f;
             RegisterProjectile(P("bigsnowball", "bigsnowball", 4f, 0.075f, 0.4f, true, "", 0, "", true, false, true));
             RegisterProjectile(P("cybermissileprojectile", "cybermissileprojectile", 30f, 0.2f, 0.2f, true, "antiairbomb", 1, "fx_boat_explosion", false, true, true, "", false, true));
             RegisterProjectile(P("artilleryshell", "artilleryshell", 19f, 0.2f, 0.2f, true, "nonannoyingbomb", 3, "fx_explosion_middle", false, true, true, "", false, true));
@@ -230,6 +254,19 @@ namespace ModernBoxM2Rewrite
             RegisterAttack("MIRV", Stats("range", 0f, "accuracy", 0f, "attack_speed", 1f, "damage", 0f));
             RegisterAttack("MIRVBomb", Stats("range", 0f, "accuracy", 0f, "attack_speed", 1f, "damage", 0f));
             RegisterAttack("snowballindaface", Stats("targets", 10f, "range", 16f, "projectiles", 1f, "critical_chance", 0.3f, "critical_damage_multiplier", 0.8f));
+
+            // guns.cs / MedievalUnits.cs gave the ice attacks the "ice" item modifier (freezes on hit).
+            ItemModAsset ice = AssetManager.items_modifiers.get("ice");
+            if (ice != null)
+            {
+                foreach (string id in new[] { "icebolt", "snowthrow", "snowballindaface" })
+                {
+                    EquipmentAsset attack = AssetManager.items.get(id);
+                    if (attack == null) continue;
+                    attack.item_modifier_ids = new[] { "ice" };
+                    attack.item_modifiers = new[] { ice };
+                }
+            }
         }
 
         private static ProjectileSpec P(string id, string texture, float speed, float startScale, float targetScale,
@@ -308,10 +345,13 @@ namespace ModernBoxM2Rewrite
             projectile.draw_light_area = spec.DrawLight;
             projectile.draw_light_size = spec.DrawLight ? spec.LightSize : 0f;
             projectile.trigger_on_collision = false;
-            projectile.can_be_collided = true;
+            // The old engine had no projectile-vs-projectile collisions.
+            projectile.can_be_collided = false;
             projectile.can_be_left_on_ground = false;
             projectile.can_be_blocked = false;
             projectile.use_min_angle_height = spec.Parabolic;
+            if (spec.Parabolic && !LegacyDirectProjectileIds.Contains(spec.Id))
+                LegacyArcProjectileIds.Add(spec.Id);
             projectile.mass = 1f;
             projectile.size = 0.5f;
             projectile.impact_actions = null;
@@ -321,9 +361,15 @@ namespace ModernBoxM2Rewrite
 
         private static void RegisterTerraform(string id, bool damageBuildings, bool explodeTile, int strength, bool highFlyers, bool setFire)
         {
+            // Like guns.cs, start from the grenade so the blast keeps its flash,
+            // knockback, random fires and pixel effect.
             TerraformOptions terraform = AssetManager.terraform.get(id);
-            bool add = terraform == null;
-            if (add) terraform = new TerraformOptions { id = id };
+            bool add = false;
+            if (terraform == null)
+            {
+                if (AssetManager.terraform.get("grenade") != null) terraform = AssetManager.terraform.clone(id, "grenade");
+                else { terraform = new TerraformOptions { id = id }; add = true; }
+            }
             terraform.id = id;
             terraform.shake = false;
             terraform.explode_tile = explodeTile;
@@ -335,6 +381,7 @@ namespace ModernBoxM2Rewrite
             terraform.remove_ruins = false;
             terraform.attack_type = AttackType.Explosion;
             if (add) AssetManager.terraform.add(terraform);
+            M2NoBlastStun.Register(id);
         }
 
         private static void RegisterEffect(string id, string path, string sound, float lightSize, float lightOffsetY, int limit)
@@ -391,7 +438,13 @@ namespace ModernBoxM2Rewrite
             attack.pool_rate = 0;
             attack.equipment_value = id == "GunshipCannon" ? 300 : 0;
             attack.path_slash_animation = "effects/slashes/slash_punch";
-            foreach (KeyValuePair<string, float> pair in stats) attack.base_stats[pair.Key] = pair.Value;
+            foreach (KeyValuePair<string, float> pair in stats)
+            {
+                // The old attack_speed is folded into each unit's own stat (M2AttackSpeed.ForUnit).
+                if (pair.Key == "attack_speed") { M2AttackSpeed.RecordLegacyAttack(id, pair.Value); attack.base_stats[pair.Key] = 0f; }
+                else if (pair.Key == "critical_damage_multiplier") attack.base_stats[pair.Key] = M2AttackSpeed.CritMultiplier(pair.Value);
+                else attack.base_stats[pair.Key] = pair.Value;
+            }
         }
     }
 }

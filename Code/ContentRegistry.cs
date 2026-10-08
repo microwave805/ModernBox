@@ -34,6 +34,8 @@ namespace ModernBoxM2Rewrite
         internal static void RegisterAll()
         {
             BuildSpecifications();
+            M2AttackSpeed.SnapshotVanillaTraits();
+            M2AttackSpeed.AllowOriginalSlowest();
             EquipmentAndTraitsRegistry.RegisterResourcesAndProjectiles();
             EquipmentAndTraitsRegistry.RegisterEquipment();
             EquipmentAndTraitsRegistry.RegisterTraits();

@@ -95,9 +95,7 @@ namespace ModernBoxM2Rewrite
         private void Update()
         {
             if (!Ready || World.world == null) return;
-            ProductionService.Update(Time.deltaTime);
             InvasionService.Update(Time.deltaTime);
-            BombService.Update();
         }
 
         private void OnGUI()

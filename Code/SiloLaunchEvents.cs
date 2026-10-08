@@ -21,8 +21,8 @@ namespace ModernBoxM2Rewrite
             BuildOrder order = orders.list.Find(candidate => candidate != null && candidate.id == orderId);
             if (order == null)
             {
+                // Commerce.turnOnNukes: one silo from 50 people and 16 buildings, nothing else.
                 order = orders.addBuilding(orderId, 1, 50, 16, false, false, 0);
-                order.requirements_types = new[] { "type_bonfire" };
             }
             Orders[orders] = order;
             _ordersActive = null;
