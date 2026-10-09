@@ -72,27 +72,6 @@ namespace ModernBoxM2Rewrite
             return Mathf.Max(1, Mathf.RoundToInt(oldValue)) - 2f;
         }
 
-        // attack_speed of the game's own traits before M2 registers anything. These keep the
-        // old engine's numbers (fast is +5 in both), which only make sense on the old scale.
-        private static readonly Dictionary<string, float> VanillaTraits = new Dictionary<string, float>(StringComparer.Ordinal);
-
-        internal static void SnapshotVanillaTraits()
-        {
-            VanillaTraits.Clear();
-            foreach (ActorTrait trait in AssetManager.traits.list)
-            {
-                float value = trait.base_stats["attack_speed"];
-                if (value != 0f) VanillaTraits[trait.id] = value;
-            }
-        }
-
-        // A vanilla trait M2 has not rewritten with its own converted value.
-        internal static bool IsVanillaTrait(ActorTrait trait)
-        {
-            float value;
-            return VanillaTraits.TryGetValue(trait.id, out value) && value == trait.base_stats["attack_speed"];
-        }
-
         // The old engine's slowest attack was every 2.96 s, 0.51.2 stops at 2 s.
         internal static void AllowOriginalSlowest()
         {

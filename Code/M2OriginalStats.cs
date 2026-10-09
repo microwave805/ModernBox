@@ -222,54 +222,117 @@ namespace ModernBoxM2Rewrite
                 }
             }
 
-            // The game's own traits, statuses, clans, languages and cultures add attack_speed
-            // in old-engine numbers (fast is +5 in both engines). On 0.51.2's 1/s scale that
-            // is +5 shots a second, so an M2 vehicle with fast fired 16x as often. Convert
-            // those bonuses the way the old engine would have applied them.
-            float vanilla = VanillaAttackSpeed(__instance);
-            if (vanilla != 0f)
-            {
-                float oldBase = M2AttackSpeed.OldTotal(spec.AttackSpeed, spec.Attack);
-                float scale = 1f + stats["multiplier_attack_speed"];
-                stats["attack_speed"] += (M2AttackSpeed.Delta(vanilla, oldBase) - vanilla) * scale;
-            }
-
-            // Old Actor.updateStats: per level above 1, +20 health, +1/2 damage, +1/3 armor and
-            // +1 old-scale attack_speed. 0.51.2 gives level * 5% health instead; swap it back.
+            // 0.51.2 rebalanced the game's own traits and statuses (mostly into percentage
+            // multipliers), gives clans, languages and cultures combat stats, adds warfare / 5
+            // to damage and gives level * 5% health. None of that is what the old engine did,
+            // and on M2's high-stat vehicles the difference is large. Swap all of it for the
+            // old engine's numbers, including its per-level bonuses (+20 health, +1/2 damage,
+            // +1/3 armor, +1 old-scale attack_speed).
             int level = __instance.data.level;
-            if (level > 0)
+            float newLevel = 1f + level * SimGlobals.m.level_mod_bonus_health;
+            if (level > 0 && newLevel > 0f) stats["health"] /= newLevel;
+            stats["damage"] -= stats["warfare"] / 5f;
+
+            float[] newAdd = new float[M2OldVanillaStats.Count];
+            float[] newMult = new float[M2OldVanillaStats.Count];
+            float[] oldStats = new float[M2OldVanillaStats.Count];
+            float newAccuracy = 0f;
+            CollectVanilla(__instance, newAdd, newMult, oldStats, ref newAccuracy);
+            int bonusLevels = Math.Max(0, level - 1);
+
+            Swap(stats, "health", "multiplier_health", M2OldVanillaStats.Health, M2OldVanillaStats.ModHealth, newAdd, newMult, oldStats, bonusLevels * 20);
+            Swap(stats, "damage", "multiplier_damage", M2OldVanillaStats.Damage, M2OldVanillaStats.ModDamage, newAdd, newMult, oldStats, bonusLevels / 2);
+            Swap(stats, "armor", null, M2OldVanillaStats.Armor, M2OldVanillaStats.ModArmor, newAdd, newMult, oldStats, bonusLevels / 3);
+            Swap(stats, "speed", "multiplier_speed", M2OldVanillaStats.Speed, M2OldVanillaStats.ModSpeed, newAdd, newMult, oldStats, 0f, M2OriginalStats.SpeedScale);
+            Swap(stats, "critical_chance", "multiplier_crit", M2OldVanillaStats.Crit, M2OldVanillaStats.ModCrit, newAdd, newMult, oldStats, 0f);
+            Swap(stats, "lifespan", "multiplier_lifespan", M2OldVanillaStats.MaxAge, -1, newAdd, newMult, oldStats, 0f);
+            // Both engines scale a ranged unit's range by the world era afterwards.
+            float era = __instance.hasRangeAttack() && World.world_era != null ? World.world_era.range_weapons_multiplier : 0f;
+            if (1f + era > 0.01f)
+                stats["range"] = (stats["range"] / (1f + era) - newAdd[M2OldVanillaStats.Range] + oldStats[M2OldVanillaStats.Range]) * (1f + era);
+            // The old engine ignored accuracy.
+            stats["accuracy"] -= newAccuracy;
+
+            // attack_speed: strip the 0.51.2 bonuses, then add what the old bonuses and levels
+            // did to the unit's old-scale value (old: (value + level - 1) * (1 + mods)).
+            float attackMultiplier = stats["multiplier_attack_speed"];
+            if (1f + attackMultiplier > 0.01f)
             {
-                float newBonus = 1f + level * SimGlobals.m.level_mod_bonus_health;
-                if (newBonus > 0f) stats["health"] = stats["health"] / newBonus + (level - 1) * 20;
-                stats["damage"] += (level - 1) / 2;
-                stats["armor"] += (level - 1) / 3;
-                float oldAttack = M2AttackSpeed.OldTotal(spec.AttackSpeed, spec.Attack);
-                stats["attack_speed"] += M2AttackSpeed.ToNew(oldAttack + level - 1) - M2AttackSpeed.ToNew(oldAttack);
+                float m2Only = (stats["attack_speed"] / (1f + attackMultiplier) - newAdd[M2OldVanillaStats.AttackSpeed]) *
+                               (1f + attackMultiplier - newMult[M2OldVanillaStats.AttackSpeed]);
+                float oldBase = M2AttackSpeed.OldTotal(spec.AttackSpeed, spec.Attack);
+                float oldTotal = (oldBase + oldStats[M2OldVanillaStats.AttackSpeed] + bonusLevels) *
+                                 (1f + oldStats[M2OldVanillaStats.ModAttackSpeed]);
+                stats["attack_speed"] = m2Only + M2AttackSpeed.ToNew(oldTotal) - M2AttackSpeed.ToNew(oldBase);
             }
             stats.normalize();
             if (__instance.getHealth() > __instance.getMaxHealth()) __instance.setMaxHealth();
         }
 
-        private static float VanillaAttackSpeed(Actor actor)
+        // Value before multipliers: remove the 0.51.2 sources, add the old ones (old flat speed
+        // is scaled like every other M2 speed), then reapply the multipliers.
+        private static void Swap(BaseStats stats, string key, string multiplierKey, int index, int modIndex,
+            float[] newAdd, float[] newMult, float[] oldStats, float oldExtra, float oldScale = 1f)
         {
-            float total = 0f;
+            float multiplier = multiplierKey == null ? 0f : stats[multiplierKey];
+            if (1f + multiplier <= 0.01f) return;
+            float baseValue = stats[key] / (1f + multiplier) - newAdd[index] + oldStats[index] * oldScale + oldExtra;
+            float oldMod = modIndex < 0 ? 0f : oldStats[modIndex];
+            stats[key] = baseValue * (1f + multiplier - newMult[index] + oldMod);
+        }
+
+        // Same column order as M2OldVanillaStats (health .. max_age).
+        private static readonly string[] NewKeys =
+        {
+            "health", "damage", "armor", "speed", "attack_speed", "range", "critical_chance", "lifespan"
+        };
+        private static readonly string[] NewMultiplierKeys =
+        {
+            "multiplier_health", "multiplier_damage", null, "multiplier_speed", "multiplier_attack_speed", null, "multiplier_crit", "multiplier_lifespan"
+        };
+
+        private static void AddNew(BaseStats source, float[] newAdd, float[] newMult, ref float accuracy)
+        {
+            if (source == null) return;
+            for (int i = 0; i < NewKeys.Length; i++)
+            {
+                newAdd[i] += source[NewKeys[i]];
+                if (NewMultiplierKeys[i] != null) newMult[i] += source[NewMultiplierKeys[i]];
+            }
+            accuracy += source["accuracy"];
+        }
+
+        private static void AddOld(float[] values, float[] oldStats)
+        {
+            for (int i = 0; i < values.Length && i < oldStats.Length; i++) oldStats[i] += values[i];
+        }
+
+        private static void CollectVanilla(Actor actor, float[] newAdd, float[] newMult, float[] oldStats, ref float accuracy)
+        {
+            float[] values;
             foreach (ActorTrait trait in actor.getTraits())
             {
                 if (trait.only_active_on_era_flag && ((trait.era_active_moon && !World.world_era.flag_moon) ||
                     (trait.era_active_night && !World.world_era.overlay_darkness))) continue;
-                if (M2AttackSpeed.IsVanillaTrait(trait)) total += trait.base_stats["attack_speed"];
+                if (!M2OldVanillaStats.IsOldGameTrait(trait)) continue;
+                AddNew(trait.base_stats, newAdd, newMult, ref accuracy);
+                if (M2OldVanillaStats.Traits.TryGetValue(trait.id, out values)) AddOld(values, oldStats);
             }
             if (actor.hasAnyStatusEffect())
                 foreach (Status status in actor.getStatuses())
-                    total += status.asset.base_stats["attack_speed"];
+                {
+                    if (status.asset == null || !M2OldVanillaStats.StatusIds.Contains(status.asset.id)) continue;
+                    AddNew(status.asset.base_stats, newAdd, newMult, ref accuracy);
+                    if (M2OldVanillaStats.Statuses.TryGetValue(status.asset.id, out values)) AddOld(values, oldStats);
+                }
+            // Clans, languages and cultures gave no combat stats in the old engine.
             if (actor.hasClan())
             {
-                total += actor.clan.base_stats["attack_speed"];
-                total += (actor.isSexMale() ? actor.clan.base_stats_male : actor.clan.base_stats_female)["attack_speed"];
+                AddNew(actor.clan.base_stats, newAdd, newMult, ref accuracy);
+                AddNew(actor.isSexMale() ? actor.clan.base_stats_male : actor.clan.base_stats_female, newAdd, newMult, ref accuracy);
             }
-            if (actor.hasLanguage()) total += actor.language.base_stats["attack_speed"];
-            if (actor.hasCulture()) total += actor.culture.base_stats["attack_speed"];
-            return total;
+            if (actor.hasLanguage()) AddNew(actor.language.base_stats, newAdd, newMult, ref accuracy);
+            if (actor.hasCulture()) AddNew(actor.culture.base_stats, newAdd, newMult, ref accuracy);
         }
     }
 
